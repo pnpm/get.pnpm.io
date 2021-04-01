@@ -1,0 +1,4 @@
+[[redirects]]
+  from = "/v6"
+  to = "https://unpkg.com/pnpm@6.0.0-beta.0/dist/pnpm.js"
+  status = 200
