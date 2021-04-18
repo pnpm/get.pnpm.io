@@ -1,8 +1,4 @@
 [[redirects]]
-  from = "/v6.js"
-  to = "https://unpkg.com/pnpm@6.0.0/dist/pnpm.cjs"
-  status = 200
-[[redirects]]
   from = "/v5.js"
   to = "https://unpkg.com/pnpm@5.18.9/dist/pnpm.js"
   status = 200
