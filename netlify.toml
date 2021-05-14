@@ -2,3 +2,7 @@
   from = "/v5.js"
   to = "https://unpkg.com/pnpm@5.18.9/dist/pnpm.js"
   status = 200
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "public, s-max-age=604800"
