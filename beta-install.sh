@@ -38,7 +38,9 @@ detect_arch() {
 
 platform="$(detect_platform)"
 arch="$(detect_arch)"
-archive_url="https://registry.npmjs.org/@pnpm/${platform}-${arch}/-/${platform}-${arch}-0.0.1-4.tgz"
+pkgName="@pnpm/${platform}-${arch}"
+version="$(curl -f https://registry.npmjs.org/${pkgName} | grep -Po '"latest":"([^"]*)' | grep -Po "[0-9].+")"
+archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
 
 curl --progress-bar --show-error --location --output "pnpm.tgz" "$archive_url"
 
