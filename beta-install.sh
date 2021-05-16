@@ -72,3 +72,5 @@ install_from_file() {
 install_dir="$HOME/.pnpm"
 
 install_from_file "pnpm.tgz" "$install_dir"
+
+rm pnpm.tgz
