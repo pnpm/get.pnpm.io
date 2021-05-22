@@ -66,6 +66,7 @@ install_from_file() {
   info 'Extracting' "pnpm binaries"
   # extract the files to the specified directory
   tar -xf "$archive" -C "$install_dir" --strip-components=1
+  $install_dir/pnpm setup
 }
 
 # install to PNPM_HOME, defaulting to ~/.pnpm
