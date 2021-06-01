@@ -9,7 +9,7 @@ curl -O https://get.pnpm.io/SHASUMS256.txt
 To check that a downloaded file matches the checksum, run it through sha256sum with a command such as:
 
 ```
-grep v6.js SHASUMS256.txt | sha256sum -c -
+grep v6.6.js SHASUMS256.txt | sha256sum -c -
 ```
 
 The GPG detached signature of `SHASUMS256.txt` is in `SHASUMS256.txt.sig`.
