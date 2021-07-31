@@ -1,0 +1,6 @@
+[pnpm]
+name=pnpm repository
+baseurl=https://get.pnpm.io/rpm
+enabled=1
+gpgcheck=0
+
