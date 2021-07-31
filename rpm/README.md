@@ -17,8 +17,8 @@ curl --silent --location https://get.pnpm.io/rpm/pnpm.repo | sudo tee /etc/yum.r
 Then you can simply:
 
 ```sh
-sudo yum install yarn
+sudo yum install pnpm
 ## OR ##
-sudo dnf install yarn
+sudo dnf install pnpm
 ```
 
