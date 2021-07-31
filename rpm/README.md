@@ -22,3 +22,12 @@ sudo yum install pnpm
 sudo dnf install pnpm
 ```
 
+## Testing
+
+```
+docker run -it centos sh
+curl --silent --location https://get.pnpm.io/rpm/pnpm.repo | tee /etc/yum.repos.d/pnpm.repo
+dnf install pnpm -y
+pnpm env use -g lts
+```
+
