@@ -2,7 +2,7 @@ name: Shellcheck
 
 on:
   push:
-    branches: [main, umireon-shellcheck]
+    branches: [main]
   pull_request:
     branches: [main]
 
