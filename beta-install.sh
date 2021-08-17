@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 detect_platform() {
-  local platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  local platform
+  platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
   case "${platform}" in
     linux) platform="linux" ;;
@@ -39,7 +40,7 @@ detect_arch() {
 platform="$(detect_platform)"
 arch="$(detect_arch)"
 pkgName="@pnpm/${platform}-${arch}"
-version="$(curl -f https://registry.npmjs.org/${pkgName} | grep -Po '"latest":"([^"]*)' | grep -Po "[0-9].+")"
+version="$(curl -f "https://registry.npmjs.org/${pkgName}" | grep -Po '"latest":"([^"]*)' | grep -Po "[0-9].+")"
 archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
 
 curl --progress-bar --show-error --location --output "pnpm.tgz" "$archive_url"
@@ -49,8 +50,7 @@ create_tree() {
 
   info 'Creating' "directory layout"
 
-  mkdir -p "$install_dir" && mkdir -p "$install_dir"/bin
-  if [ "$?" != 0 ]
+  if ! mkdir -p "$install_dir" && mkdir -p "$install_dir"/bin;
   then
     error "Could not create directory layout. Please make sure the target directory is writeable: $install_dir"
     exit 1
@@ -66,7 +66,7 @@ install_from_file() {
   info 'Extracting' "pnpm binaries"
   # extract the files to the specified directory
   tar -xf "$archive" -C "$install_dir" --strip-components=1
-  SHELL=$SHELL $install_dir/pnpm setup
+  SHELL=$SHELL "$install_dir/pnpm" setup
 }
 
 # install to PNPM_HOME, defaulting to ~/.pnpm
