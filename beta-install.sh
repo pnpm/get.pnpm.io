@@ -46,32 +46,33 @@ archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${versi
 curl --progress-bar --show-error --location --output "pnpm.tgz" "$archive_url"
 
 create_tree() {
-  local install_dir="$1"
+  local tmp_dir="$1"
 
   info 'Creating' "directory layout"
 
-  if ! mkdir -p "$install_dir" && mkdir -p "$install_dir"/bin;
+  if ! mkdir -p "$tmp_dir";
   then
-    error "Could not create directory layout. Please make sure the target directory is writeable: $install_dir"
+    error "Could not create directory layout. Please make sure the target directory is writeable: $tmp_dir"
     exit 1
   fi
 }
 
 install_from_file() {
   local archive="$1"
-  local install_dir="$2"
+  local tmp_dir="$2"
 
-  create_tree "$install_dir"
+  create_tree "$tmp_dir"
 
   info 'Extracting' "pnpm binaries"
   # extract the files to the specified directory
-  tar -xf "$archive" -C "$install_dir" --strip-components=1
-  SHELL=$SHELL "$install_dir/pnpm" setup
+  tar -xf "$archive" -C "$tmp_dir" --strip-components=1
+  SHELL=$SHELL "$tmp_dir/pnpm" setup
 }
 
 # install to PNPM_HOME, defaulting to ~/.pnpm
-install_dir="$HOME/.pnpm"
+tmp_dir="pnpm_tmp"
 
-install_from_file "pnpm.tgz" "$install_dir"
+install_from_file "pnpm.tgz" "$tmp_dir"
 
-rm pnpm.tgz
+rm -rf pnpm.tgz pnpm_tmp
+
