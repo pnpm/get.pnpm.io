@@ -18,7 +18,7 @@ You will first need to import the GPG keys of individuals authorized to create r
 To import the keys:
 
 ```
-gpg --keyserver pool.sks-keyservers.net --recv-keys 6E67764A55961854
+curl https://keybase.io/pnpm/pgp_keys.asc | gpg --import
 ```
 
 Next, download the `SHASUMS256.txt.sig`:
