@@ -21,4 +21,4 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Shellcheck
-        run: shellcheck -s ${{ matrix.shell }}beta-install.sh
+        run: shellcheck -s ${{ matrix.shell }} beta-install.sh
