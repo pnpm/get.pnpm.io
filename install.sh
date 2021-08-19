@@ -10,6 +10,7 @@ error() {
 }
 
 detect_platform() {
+  local platform
   platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
   case "${platform}" in
@@ -22,6 +23,7 @@ detect_platform() {
 }
 
 detect_arch() {
+  local arch
   arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
 
   case "${arch}" in
@@ -55,6 +57,7 @@ archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${versi
 curl --progress-bar --show-error --location --output "pnpm.tgz" "$archive_url"
 
 create_tree() {
+  local tmp_dir
   tmp_dir="$1"
 
   info 'Creating' "directory layout"
@@ -67,6 +70,8 @@ create_tree() {
 }
 
 install_from_file() {
+  local archive
+  local tmp_dir
   archive="$1"
   tmp_dir="$2"
 
