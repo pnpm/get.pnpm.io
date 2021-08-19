@@ -1,0 +1,24 @@
+Name: Install
+on: [push, pull_request]
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        shell:
+          - sh
+          - dash
+          - bash
+          - zsh
+        script:
+          - beta-install.sh
+          - install.sh
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install shell
+        run: sudo apt-get install -y ${{ matrix.shell }}
+      - name: Run installation script
+        run: ${{ matrix.shell }} ${{ matrix.script }}
