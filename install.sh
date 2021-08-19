@@ -67,7 +67,7 @@ echo
 platform="$(detect_platform)"
 arch="$(detect_arch)"
 pkgName="@pnpm/${platform}-${arch}"
-version="$(curl -f "https://registry.npmjs.org/${pkgName}" | grep -Po '"latest":"([^"]*)' | grep -Po "[0-9].+")"
+version="$(curl -f "https://registry.npmjs.org/${pkgName}" | tr '{' '\n' | awk -F '"' '/latest/ { print $4 }')"
 archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
 
 curl --progress-bar --show-error --location --output "pnpm.tgz" "$archive_url"
