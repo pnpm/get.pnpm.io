@@ -9,10 +9,10 @@ jobs:
     strategy:
       matrix:
         shell:
-          - sh
-          - dash
           - bash
+          - dash
           - ksh
+          - sh
         script:
           - beta-install.sh
           - install.sh

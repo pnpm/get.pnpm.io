@@ -8,9 +8,9 @@ jobs:
     strategy:
       matrix:
         shell:
-          - sh
-          - dash
           - bash
+          - dash
+          - ksh
           - zsh
         script:
           - beta-install.sh
