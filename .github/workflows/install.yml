@@ -12,6 +12,7 @@ jobs:
           - bash
           - dash
           - ksh
+          - sh
           - zsh
         script:
           - beta-install.sh
@@ -21,5 +22,6 @@ jobs:
       - uses: actions/checkout@v2
       - name: Install shell
         run: sudo apt-get install -y ${{ matrix.shell }}
+        if: ${{ matrix.shell != 'sh' }}
       - name: Run installation script
         run: ${{ matrix.shell }} ${{ matrix.script }}
