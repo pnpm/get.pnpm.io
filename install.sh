@@ -70,7 +70,7 @@ detect_arch() {
   fi
 
   if [[ "$arch" != "x64"* ]]; then
-    abort "Sorry! pnpm currently only provides pre-built binaries for x86_64 architectures." 2>&1
+    abort "Sorry! pnpm currently only provides pre-built binaries for x86_64 architectures."
   fi
   printf '%s' "${arch}"
 }
