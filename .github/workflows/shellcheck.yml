@@ -20,6 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Update shellcheck
-        run: apt-get install shellcheck
+        run: sudo apt-get install shellcheck
       - name: Shellcheck
         run: shellcheck -s ${{ matrix.shell }} ${{ matrix.script }}
