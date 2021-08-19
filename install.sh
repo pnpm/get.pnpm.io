@@ -62,6 +62,7 @@ detect_arch() {
 }
 
 detect_arch
+echo
 
 platform="$(detect_platform)"
 arch="$(detect_arch)"
