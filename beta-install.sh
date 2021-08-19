@@ -1,7 +1,15 @@
-#!/usr/bin/env bash
+#!/bin/sh
+
+info() {
+  echo "$@"
+}
+
+error() {
+  echo "$@"
+  exit 1
+}
 
 detect_platform() {
-  local platform
   platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
   case "${platform}" in
@@ -14,7 +22,6 @@ detect_platform() {
 }
 
 detect_arch() {
-  local arch
   arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
 
   case "${arch}" in
@@ -31,11 +38,14 @@ detect_arch() {
     arch=arm
   fi
 
-  if [[ "$arch" != "x64"* ]]; then
-    error "Sorry! pnpm currently only provides pre-built binaries for x86_64 architectures."
-  fi
+  case "$arch" in
+    x64*) ;;
+    *) error "Sorry! pnpm currently only provides pre-built binaries for x86_64 architectures."
+  esac
   printf '%s' "${arch}"
 }
+
+detect_arch
 
 platform="$(detect_platform)"
 arch="$(detect_arch)"
@@ -46,7 +56,7 @@ archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${versi
 curl --progress-bar --show-error --location --output "pnpm.tgz" "$archive_url"
 
 create_tree() {
-  local tmp_dir="$1"
+  tmp_dir="$1"
 
   info 'Creating' "directory layout"
 
@@ -58,8 +68,8 @@ create_tree() {
 }
 
 install_from_file() {
-  local archive="$1"
-  local tmp_dir="$2"
+  archive="$1"
+  tmp_dir="$2"
 
   create_tree "$tmp_dir"
 

@@ -1,9 +1,9 @@
-name: Shellcheck
+name: Install
 
 on: [push, pull_request]
 
 jobs:
-  shellcheck:
+  install:
     runs-on: ubuntu-latest
 
     strategy:
@@ -13,11 +13,15 @@ jobs:
           - dash
           - ksh
           - sh
+          - zsh
         script:
           - beta-install.sh
           - install.sh
 
     steps:
       - uses: actions/checkout@v2
-      - name: Shellcheck
-        run: shellcheck -s ${{ matrix.shell }} ${{ matrix.script }}
+      - name: Install shell
+        run: sudo apt-get install -y ${{ matrix.shell }}
+        if: ${{ matrix.shell != 'sh' }}
+      - name: Run installation script
+        run: ${{ matrix.shell }} ${{ matrix.script }}
