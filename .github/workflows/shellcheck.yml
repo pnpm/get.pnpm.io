@@ -13,11 +13,10 @@ jobs:
           - dash
           - ksh
           - sh
-        script:
-          - beta-install.sh
-          - install.sh
 
     steps:
       - uses: actions/checkout@v2
-      - name: Shellcheck
-        run: shellcheck -s ${{ matrix.shell }} ${{ matrix.script }}
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@1.1.0
+        env:
+          SHELLCHECK_OPTS: -s ${{ matrix.shell }}
