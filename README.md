@@ -27,4 +27,8 @@ Next, download the `SHASUMS256.txt.sig`:
 curl -O https://get.pnpm.io/SHASUMS256.txt.sig
 ```
 
-Then use `gpg --verify SHASUMS256.txt.sig SHASUMS256.txt` to verify the file's signature.
+Then use the following script to verify the file's signature:
+
+```
+gpg --verify SHASUMS256.txt.sig SHASUMS256.txt
+```
