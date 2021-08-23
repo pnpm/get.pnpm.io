@@ -23,6 +23,14 @@ ohai() {
 
 # End from https://github.com/Homebrew/install/blob/master/install.sh
 
+download() {
+  if command -v curl > /dev/null 2>&1; then
+    curl -fsSL "$1"
+  else
+    wget -qO- "$1"
+  fi
+}
+
 detect_platform() {
   local platform
   platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -71,8 +79,6 @@ pkgName="@pnpm/${platform}-${arch}"
 version="$(curl -f "https://registry.npmjs.org/${pkgName}" | tr '{' '\n' | awk -F '"' '/latest/ { print $4 }')"
 archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
 
-curl --progress-bar --show-error --location --output "pnpm.tgz" "$archive_url"
-
 create_tree() {
   local tmp_dir="$1"
 
@@ -84,22 +90,21 @@ create_tree() {
   fi
 }
 
-install_from_file() {
-  local archive="$1"
+download_and_install() {
+  local archive_url="$1"
   local tmp_dir="$2"
 
   create_tree "$tmp_dir"
 
   ohai 'Extracting pnpm binaries'
   # extract the files to the specified directory
-  tar -xf "$archive" -C "$tmp_dir" --strip-components=1
+  download "$archive_url" | tar -x -C "$tmp_dir" --strip-components=1
   SHELL=$SHELL "$tmp_dir/pnpm" setup
 }
 
 # install to PNPM_HOME, defaulting to ~/.pnpm
 tmp_dir="pnpm_tmp"
 
-install_from_file "pnpm.tgz" "$tmp_dir"
+download_and_install "$archive_url" "$tmp_dir"
 
-rm -rf pnpm.tgz pnpm_tmp
-
+rm -rf pnpm_tmp
