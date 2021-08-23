@@ -94,5 +94,3 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM HUP
 
 download_and_install "$archive_url" "$tmp_dir"
-
-rm -rf pnpm_tmp
