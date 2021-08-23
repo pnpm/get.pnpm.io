@@ -85,7 +85,7 @@ download_and_install() {
 
   ohai 'Extracting pnpm binaries'
   # extract the files to the specified directory
-  download "$archive_url" | tar -x -C "$tmp_dir" --strip-components=1
+  download "$archive_url" | tar -xz -C "$tmp_dir" --strip-components=1
   SHELL=$SHELL "$tmp_dir/pnpm" setup
 }
 
