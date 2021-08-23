@@ -79,22 +79,9 @@ pkgName="@pnpm/${platform}-${arch}"
 version="$(curl -f "https://registry.npmjs.org/${pkgName}" | tr '{' '\n' | awk -F '"' '/latest/ { print $4 }')"
 archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
 
-create_tree() {
-  local tmp_dir="$1"
-
-  ohai 'Creating directory layout'
-
-  if ! mkdir -p "$tmp_dir";
-  then
-    abort "Could not create directory layout. Please make sure the target directory is writeable: $tmp_dir"
-  fi
-}
-
 download_and_install() {
   local archive_url="$1"
   local tmp_dir="$2"
-
-  create_tree "$tmp_dir"
 
   ohai 'Extracting pnpm binaries'
   # extract the files to the specified directory
@@ -103,7 +90,8 @@ download_and_install() {
 }
 
 # install to PNPM_HOME, defaulting to ~/.pnpm
-tmp_dir="pnpm_tmp"
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT INT TERM HUP
 
 download_and_install "$archive_url" "$tmp_dir"
 
