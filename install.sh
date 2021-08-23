@@ -44,19 +44,20 @@ detect_arch() {
     x86_64) arch="x64" ;;
     amd64) arch="x64" ;;
     armv*) arch="arm" ;;
-    arm64) arch="aarch64" ;;
+    arm64) arch="arm64" ;;
   esac
 
   # `uname -m` in some cases mis-reports 32-bit OS as 64-bit, so double check
   if [ "${arch}" = "x64" ] && [ "$(getconf LONG_BIT)" -eq 32 ]; then
     arch=i686
-  elif [ "${arch}" = "aarch64" ] && [ "$(getconf LONG_BIT)" -eq 32 ]; then
+  elif [ "${arch}" = "arm64" ] && [ "$(getconf LONG_BIT)" -eq 32 ]; then
     arch=arm
   fi
 
   case "$arch" in
     x64*) ;;
-    *) abort "Sorry! pnpm currently only provides pre-built binaries for x86_64 architectures."
+    arm64*) ;;
+    *) abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
   esac
   printf '%s' "${arch}"
 }
