@@ -73,7 +73,7 @@ detect_arch() {
 platform="$(detect_platform)"
 arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
 pkgName="@pnpm/${platform}-${arch}"
-version_json="$(download "httpss://registry.npmjs.org/${pkgName}")" || abort "Download Error!"
+version_json="$(download "https://registry.npmjs.org/${pkgName}")" || abort "Download Error!"
 version="$(printf '%s' "${version_json}" | tr '{' '\n' | awk -F '"' '/latest/ { print $4 }')"
 archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
 
