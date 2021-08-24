@@ -32,8 +32,7 @@ download() {
 }
 
 detect_platform() {
-  local platform
-  platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  local platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
   case "${platform}" in
     linux) platform="linux" ;;
@@ -45,8 +44,7 @@ detect_platform() {
 }
 
 detect_arch() {
-  local arch
-  arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
+  local arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
 
   case "${arch}" in
     x86_64) arch="x64" ;;
@@ -65,18 +63,16 @@ detect_arch() {
   case "$arch" in
     x64*) ;;
     arm64*) ;;
-    *) abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
+    *) return 1
   esac
   printf '%s' "${arch}"
 }
 
-detect_arch
-echo
-
 platform="$(detect_platform)"
-arch="$(detect_arch)"
+arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
 pkgName="@pnpm/${platform}-${arch}"
-version="$(curl -f "https://registry.npmjs.org/${pkgName}" | tr '{' '\n' | awk -F '"' '/latest/ { print $4 }')"
+version_json="$(download "https://registry.npmjs.org/${pkgName}")" || abort "Download Error!"
+version="$(printf '%s' "${version_json}" | tr '{' '\n' | awk -F '"' '/latest/ { print $4 }')"
 archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
 
 download_and_install() {
@@ -85,12 +81,12 @@ download_and_install() {
 
   ohai 'Extracting pnpm binaries'
   # extract the files to the specified directory
-  download "$archive_url" | tar -xz -C "$tmp_dir" --strip-components=1
-  SHELL=$SHELL "$tmp_dir/pnpm" setup
+  download "$archive_url" | tar -xz -C "$tmp_dir" --strip-components=1 || return 1
+  SHELL="$SHELL" "$tmp_dir/pnpm" setup || return 1
 }
 
 # install to PNPM_HOME, defaulting to ~/.pnpm
-tmp_dir="$(mktemp -d)"
+tmp_dir="$(mktemp -d)" || abort "Tmpdir Error!"
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM HUP
 
-download_and_install "$archive_url" "$tmp_dir"
+download_and_install "$archive_url" "$tmp_dir" || abort "Install Error!"
