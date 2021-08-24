@@ -13,6 +13,7 @@ jobs:
           - dash
           - ksh
           - sh
+      fail-fast: false
 
     steps:
       - uses: actions/checkout@v2

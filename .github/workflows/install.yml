@@ -17,6 +17,7 @@ jobs:
         script:
           - beta-install.sh
           - install.sh
+      fail-fast: false
 
     steps:
       - uses: actions/checkout@v2
