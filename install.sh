@@ -32,7 +32,8 @@ download() {
 }
 
 detect_platform() {
-  local platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  local platform
+  platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
   case "${platform}" in
     linux) platform="linux" ;;
@@ -44,7 +45,8 @@ detect_platform() {
 }
 
 detect_arch() {
-  local arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
+  local arch
+  arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
 
   case "${arch}" in
     x86_64) arch="x64" ;;
