@@ -1,4 +1,4 @@
-name: Install on Ubuntu
+name: Install on macOS
 
 on:
   - push
