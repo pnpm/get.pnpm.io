@@ -1,12 +1,12 @@
-name: Install
+name: Install on Ubuntu
 
-on: [push, pull_request]
+on:
+  - push
+  - pull_request
 
 jobs:
   install:
-    runs-on: 
-      - ubuntu-latest
-      - macos-latest
+    runs-on: ubuntu-latest
 
     strategy:
       matrix:
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install shell
-        run: sudo apt-get install -y ${{ matrix.shell }}
-        if: ${{ matrix.shell != 'sh' }}
+        run: brew install ${{ matrix.shell }}
+        if: ${{ matrix.shell != 'sh' || matrix.shell != 'bash' }}
       - name: Run installation script
         run: ${{ matrix.shell }} ${{ matrix.script }}

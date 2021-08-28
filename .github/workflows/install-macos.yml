@@ -1,0 +1,29 @@
+name: Install on Ubuntu
+
+on: [push, pull_request]
+
+jobs:
+  install:
+    runs-on: 
+      - ubuntu-latest
+      - macos-latest
+
+    strategy:
+      matrix:
+        shell:
+          - bash
+          - dash
+          - ksh
+          - sh
+          - zsh
+        script:
+          - install.sh
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install shell
+        run: sudo apt-get install -y ${{ matrix.shell }}
+        if: ${{ matrix.shell != 'sh' }}
+      - name: Run installation script
+        run: ${{ matrix.shell }} ${{ matrix.script }}
