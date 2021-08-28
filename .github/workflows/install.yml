@@ -4,7 +4,9 @@ on: [push, pull_request]
 
 jobs:
   install:
-    runs-on: ubuntu-latest
+    runs-on: 
+      - ubuntu-latest
+      - macos-latest
 
     strategy:
       matrix:
@@ -15,7 +17,6 @@ jobs:
           - sh
           - zsh
         script:
-          - beta-install.sh
           - install.sh
       fail-fast: false
 
