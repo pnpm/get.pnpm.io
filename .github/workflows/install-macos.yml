@@ -24,6 +24,6 @@ jobs:
       - uses: actions/checkout@v2
       - name: Install shell
         run: brew install ${{ matrix.shell }}
-        if: ${{ matrix.shell == 'ksh' || matrix.shell != 'dash' }}
+        if: ${{ matrix.shell == 'ksh' || matrix.shell == 'dash' }}
       - name: Run installation script
         run: ${{ matrix.shell }} ${{ matrix.script }}
