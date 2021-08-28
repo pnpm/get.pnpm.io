@@ -1,10 +1,12 @@
-name: Install
+name: Install on macOS
 
-on: [push, pull_request]
+on:
+  - push
+  - pull_request
 
 jobs:
   install:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     strategy:
       matrix:
@@ -15,14 +17,13 @@ jobs:
           - sh
           - zsh
         script:
-          - beta-install.sh
           - install.sh
       fail-fast: false
 
     steps:
       - uses: actions/checkout@v2
       - name: Install shell
-        run: sudo apt-get install -y ${{ matrix.shell }}
-        if: ${{ matrix.shell != 'sh' }}
+        run: brew install ${{ matrix.shell }}
+        if: ${{ matrix.shell == 'ksh' || matrix.shell == 'dash' }}
       - name: Run installation script
-        run: ${{ matrix.shell }} ${{ matrix.script }}
+        run: SHELL="$(which ${{ matrix.shell }})" ${{ matrix.shell }} ${{ matrix.script }}
