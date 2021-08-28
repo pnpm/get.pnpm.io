@@ -24,6 +24,6 @@ jobs:
       - uses: actions/checkout@v2
       - name: Install shell
         run: brew install ${{ matrix.shell }}
-        if: ${{ matrix.shell != 'sh' || matrix.shell != 'bash' }}
+        if: ${{ matrix.shell != 'sh' }}
       - name: Run installation script
         run: ${{ matrix.shell }} ${{ matrix.script }}
