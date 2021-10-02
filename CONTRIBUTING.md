@@ -9,3 +9,10 @@ Signing:
 ```
 gpg --local-user pnpm --detach-sign SHASUMS256.txt
 ```
+
+Downloading a new pnpm CLI script:
+
+```
+curl -fsSL https://unpkg.com/pnpm@latest/dist/pnpm.cjs > v6.16.js
+```
+
