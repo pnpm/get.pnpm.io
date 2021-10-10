@@ -52,7 +52,7 @@ detect_arch() {
     x86_64) arch="x64" ;;
     amd64) arch="x64" ;;
     armv*) arch="arm" ;;
-    arm64) arch="arm64" ;;
+    arm64 | aarch64) arch="arm64" ;;
   esac
 
   # `uname -m` in some cases mis-reports 32-bit OS as 64-bit, so double check

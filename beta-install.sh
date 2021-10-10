@@ -23,6 +23,14 @@ ohai() {
 
 # End from https://github.com/Homebrew/install/blob/master/install.sh
 
+download() {
+  if command -v curl > /dev/null 2>&1; then
+    curl -fsSL "$1"
+  else
+    wget -qO- "$1"
+  fi
+}
+
 detect_platform() {
   local platform
   platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -44,7 +52,7 @@ detect_arch() {
     x86_64) arch="x64" ;;
     amd64) arch="x64" ;;
     armv*) arch="arm" ;;
-    arm64) arch="arm64" ;;
+    arm64 | aarch64) arch="arm64" ;;
   esac
 
   # `uname -m` in some cases mis-reports 32-bit OS as 64-bit, so double check
@@ -57,49 +65,30 @@ detect_arch() {
   case "$arch" in
     x64*) ;;
     arm64*) ;;
-    *) abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
+    *) return 1
   esac
   printf '%s' "${arch}"
 }
 
-detect_arch
-echo
-
 platform="$(detect_platform)"
-arch="$(detect_arch)"
+arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
 pkgName="@pnpm/${platform}-${arch}"
-version="$(curl -f "https://registry.npmjs.org/${pkgName}" | tr '{' '\n' | awk -F '"' '/latest/ { print $4 }')"
+version_json="$(download "https://registry.npmjs.org/${pkgName}")" || abort "Download Error!"
+version="$(printf '%s' "${version_json}" | tr '{' '\n' | awk -F '"' '/latest/ { print $4 }')"
 archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
 
-curl --progress-bar --show-error --location --output "pnpm.tgz" "$archive_url"
-
-create_tree() {
-  local tmp_dir="$1"
-
-  ohai 'Creating directory layout'
-
-  if ! mkdir -p "$tmp_dir";
-  then
-    abort "Could not create directory layout. Please make sure the target directory is writeable: $tmp_dir"
-  fi
-}
-
-install_from_file() {
-  local archive="$1"
+download_and_install() {
+  local archive_url="$1"
   local tmp_dir="$2"
-
-  create_tree "$tmp_dir"
 
   ohai 'Extracting pnpm binaries'
   # extract the files to the specified directory
-  tar -xf "$archive" -C "$tmp_dir" --strip-components=1
-  SHELL=$SHELL "$tmp_dir/pnpm" setup
+  download "$archive_url" | tar -xz -C "$tmp_dir" --strip-components=1 || return 1
+  SHELL="$SHELL" "$tmp_dir/pnpm" setup || return 1
 }
 
 # install to PNPM_HOME, defaulting to ~/.pnpm
-tmp_dir="pnpm_tmp"
+tmp_dir="$(mktemp -d)" || abort "Tmpdir Error!"
+trap 'rm -rf "$tmp_dir"' EXIT INT TERM HUP
 
-install_from_file "pnpm.tgz" "$tmp_dir"
-
-rm -rf pnpm.tgz pnpm_tmp
-
+download_and_install "$archive_url" "$tmp_dir" || abort "Install Error!"
