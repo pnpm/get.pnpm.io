@@ -2,6 +2,8 @@
 
 # Stop executing script on any error
 $ErrorActionPreference = 'Stop'
+# Do not show download progress
+$ProgressPreference = 'SilentlyContinue'
 
 $platform = $null
 $architecture = $null
@@ -96,7 +98,7 @@ Write-Host "Extracting downloaded '$version' archive...`n" -ForegroundColor Gree
 
 $null = New-Item -ItemType Directory -Path $tempFileFolder
 
-# 'tar.exe' exists on Windows OS as of version 1903, so this will fail unless 3rd party utility is installed 
+# 'tar.exe' exists on Windows OS as of version 1903, so this will fail in earlier versions unless 3rd party utility is installed 
 tar -xf $tempFilePath -C $tempFileFolder
 
 $exec = Get-ChildItem $tempFileFolder -Filter $pnpmName -Recurse -ErrorAction SilentlyContinue
@@ -104,7 +106,7 @@ $pnpmPath = $exec.FullName
 
 Write-Host "Running setup...`n" -ForegroundColor Green
 
-Invoke-Expression "$pnpmPath setup | Write-Host"
+Start-Process -FilePath $pnpmPath -ArgumentList "setup" -NoNewWindow -Wait
 
 Remove-Item $tempFilePath
 Remove-Item $tempFileFolder -Recurse
