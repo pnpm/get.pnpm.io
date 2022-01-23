@@ -33,7 +33,7 @@ download() {
 
 validate_url() {
   url=$1
-  wget --spider $url >/dev/null 2>&1
+  wget --spider "$url" >/dev/null 2>&1
   return $?
 }
 
