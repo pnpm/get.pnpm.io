@@ -1,4 +1,4 @@
-# PNPM installer
+# pnpm installer
 
 ## Usage
 
