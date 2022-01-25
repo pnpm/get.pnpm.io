@@ -1,0 +1,14 @@
+name: Powershell on Ubuntu
+
+on:
+  - push
+  - pull_request
+
+jobs:
+  install:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run installation script
+        run: pwsh install.ps1
