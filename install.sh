@@ -31,6 +31,16 @@ download() {
   fi
 }
 
+validate_url() {
+  local url="$1"
+
+  if command -v curl > /dev/null 2>&1; then
+    curl --output /dev/null --silent --show-error --location --head --fail "$url"
+  else
+    wget --spider --quiet "$url"
+  fi
+}
+
 detect_platform() {
   local platform
   platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -70,25 +80,28 @@ detect_arch() {
   printf '%s' "${arch}"
 }
 
-platform="$(detect_platform)"
-arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
-pkgName="@pnpm/${platform}-${arch}"
-version_json="$(download "https://registry.npmjs.org/${pkgName}")" || abort "Download Error!"
-version="$(printf '%s' "${version_json}" | tr '{' '\n' | awk -F '"' '/latest/ { print $4 }')"
-archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
-
 download_and_install() {
-  local archive_url="$1"
-  local tmp_dir="$2"
+  local platform arch pkgName version_json version archive_url tmp_dir
+  platform="$(detect_platform)"
+  arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
+  pkgName="@pnpm/${platform}-${arch}"
+  if [ -z "${PNPM_VERSION}" ]; then
+    version_json="$(download "https://registry.npmjs.org/${pkgName}")" || abort "Download Error!"
+    version="$(printf '%s' "${version_json}" | tr '{' '\n' | awk -F '"' '/latest/ { print $4 }')"
+  else
+    version="${PNPM_VERSION}"
+  fi
+  archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
+  validate_url "$archive_url"  || abort "pnpm version '${version}' could not be found"
 
-  ohai 'Extracting pnpm binaries'
+  # install to PNPM_HOME, defaulting to ~/.pnpm
+  tmp_dir="$(mktemp -d)" || abort "Tmpdir Error!"
+  trap 'rm -rf "$tmp_dir"' EXIT INT TERM HUP
+
+  ohai "Extracting pnpm binaries ${version}"
   # extract the files to the specified directory
   download "$archive_url" | tar -xz -C "$tmp_dir" --strip-components=1 || return 1
   SHELL="$SHELL" "$tmp_dir/pnpm" setup || return 1
 }
 
-# install to PNPM_HOME, defaulting to ~/.pnpm
-tmp_dir="$(mktemp -d)" || abort "Tmpdir Error!"
-trap 'rm -rf "$tmp_dir"' EXIT INT TERM HUP
-
-download_and_install "$archive_url" "$tmp_dir" || abort "Install Error!"
+download_and_install || abort "Install Error!"
