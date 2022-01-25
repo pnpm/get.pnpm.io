@@ -32,7 +32,7 @@ download() {
 }
 
 validate_url() {
-  url=$1
+  local url="$1"
 
   if command -v curl > /dev/null 2>&1; then
     curl --output /dev/null --silent --show-error --location --head --fail "$url"
