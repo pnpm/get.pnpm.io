@@ -81,6 +81,7 @@ detect_arch() {
 }
 
 download_and_install() {
+  local platform arch pkgName version_json version archive_url tmp_dir
   platform="$(detect_platform)"
   arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
   pkgName="@pnpm/${platform}-${arch}"
