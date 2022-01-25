@@ -35,12 +35,10 @@ validate_url() {
   url=$1
 
   if command -v curl > /dev/null 2>&1; then
-    curl --output /dev/null --silent --head --fail "$url" >/dev/null 2>&1
+    curl --output /dev/null --silent --show-error --location --head --fail "$url"
   else
-    wget --spider "$url" >/dev/null 2>&1
+    wget --spider --quiet "$url"
   fi
-
-  return $?
 }
 
 detect_platform() {
