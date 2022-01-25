@@ -1,4 +1,4 @@
-name: Powershell on Ubuntu
+name: Powershell on macOS
 
 on:
   - push
