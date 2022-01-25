@@ -92,7 +92,7 @@ download_and_install() {
     version="${PNPM_VERSION}"
   fi
   archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
-  validate_url "$archive_url"  || abort "PNPM version '${version}' could not be found"
+  validate_url "$archive_url"  || abort "pnpm version '${version}' could not be found"
 
   # install to PNPM_HOME, defaulting to ~/.pnpm
   tmp_dir="$(mktemp -d)" || abort "Tmpdir Error!"
