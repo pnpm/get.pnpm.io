@@ -77,15 +77,15 @@ switch ($architecture) {
   }
 }
 
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$pkgInfo = Invoke-WebRequest "https://registry.npmjs.org/@pnpm/exe" -UseBasicParsing
+$versionJson = $pkgInfo.Content | ConvertFrom-Json
+$version = $versionJson.'dist-tags'.latest
+
 $pkgName = "@pnpm/$platform-$architecture"
 
 Write-Host "Downloading '$pkgName' from 'npmjs.com' registry...`n" -ForegroundColor Green
-
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-$pkgInfo = Invoke-WebRequest "https://registry.npmjs.org/$pkgName" -UseBasicParsing
-$versionJson = $pkgInfo.Content | ConvertFrom-Json
-$version = $versionJson.'dist-tags'.latest
 
 $tempFile = New-TemporaryFile
 $archiveUrl = "https://registry.npmjs.org/$pkgName/-/$platform-$architecture-$version.tgz"
