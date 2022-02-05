@@ -84,13 +84,13 @@ download_and_install() {
   local platform arch pkgName version_json version archive_url tmp_dir
   platform="$(detect_platform)"
   arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
-  pkgName="@pnpm/${platform}-${arch}"
   if [ -z "${PNPM_VERSION}" ]; then
-    version_json="$(download "https://registry.npmjs.org/${pkgName}")" || abort "Download Error!"
+    version_json="$(download "https://registry.npmjs.org/@pnpm/exe")" || abort "Download Error!"
     version="$(printf '%s' "${version_json}" | tr '{' '\n' | awk -F '"' '/latest/ { print $4 }')"
   else
     version="${PNPM_VERSION}"
   fi
+  pkgName="@pnpm/${platform}-${arch}"
   archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
   validate_url "$archive_url"  || abort "pnpm version '${version}' could not be found"
 
