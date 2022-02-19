@@ -101,6 +101,9 @@ download_and_install() {
   ohai "Extracting pnpm binaries ${version}"
   # extract the files to the specified directory
   download "$archive_url" | tar -xz -C "$tmp_dir" --strip-components=1 || return 1
+  # for some reason with pnpm v7 this artifact stopped being an executable
+  # so this is a workaround to make the CLI executable before running it
+  chmod +x "$tmp_dir/pnpm"
   SHELL="$SHELL" "$tmp_dir/pnpm" setup || return 1
 }
 
