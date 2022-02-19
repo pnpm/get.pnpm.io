@@ -81,7 +81,33 @@ switch ($architecture) {
 
 $pkgInfo = Invoke-WebRequest "https://registry.npmjs.org/@pnpm/exe" -UseBasicParsing
 $versionJson = $pkgInfo.Content | ConvertFrom-Json
-$version = $versionJson.'dist-tags'.latest
+$versions = Get-Member -InputObject $versionJson.versions -Type NoteProperty | Select-Object -ExpandProperty Name
+$distTags = Get-Member -InputObject $versionJson.'dist-tags' -Type NoteProperty | Select-Object -ExpandProperty Name
+
+$version = $null
+$preferredVersion = "latest"
+
+if ($null -ne $env:PNPM_VERSION -and $env:PNPM_VERSION -ne "") {
+  $preferredVersion = $env:PNPM_VERSION
+}
+
+if ($null -eq $version -and $preferredVersion -in $distTags) {
+  $version = $versionJson.'dist-tags' | Select-Object -ExpandProperty $preferredVersion
+}
+
+if ($null -eq $version -and $preferredVersion -in $versions) {
+  $version = $preferredVersion
+}
+
+if ($null -eq $version) {
+  Write-Host "Current tags:" -ForegroundColor Yellow -NoNewline
+  $versionJson.'dist-tags' | Format-List
+
+  Write-Host "Versions:" -ForegroundColor Yellow -NoNewline
+  $versionJson.versions | Get-Member -Type NoteProperty | Format-Wide -Property Name -AutoSize
+
+  Write-Error "Sorry! pnpm '$preferredVersion' version could not be found. Use one of the tags or published versions from the provided list"
+}
 
 $pkgName = "@pnpm/$platform-$architecture"
 
@@ -106,7 +132,7 @@ $pnpmPath = $exec.FullName
 
 Write-Host "Running setup...`n" -ForegroundColor Green
 
-Start-Process -FilePath $pnpmPath -ArgumentList "setup" -NoNewWindow -Wait
+Start-Process -FilePath $pnpmPath -ArgumentList "setup" -NoNewWindow -Wait -ErrorAction Continue
 
 Remove-Item $tempFilePath
 Remove-Item $tempFileFolder -Recurse

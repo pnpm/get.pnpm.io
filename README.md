@@ -63,6 +63,10 @@ By default, the script will install the latest version of pnpm. A specific versi
 curl -fsSL https://get.pnpm.io/install.sh | PNPM_VERSION=6.27.2 sh -
 ```
 
+```sh
+$env:PNPM_VERSION='6.27.2' ; iwr https://get.pnpm.io/install.ps1 -useb | iex
+```
+
 All the supported environment variables that can influence pnpm's installation:
 
 | Env variable      | Type                  | Description                                                                              | Example                                           |
