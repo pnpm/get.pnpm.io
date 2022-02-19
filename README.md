@@ -67,4 +67,4 @@ All the supported environment variables that can influence pnpm's installation:
 
 | Env variable      | Type                  | Description                                                                              | Example                                           |
 | ----------------- | --------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| **PNPM_VERSION**  | _version | `latest` by default. The pnpm version to be installed.<br>(not older than `pnpm@6.27.2`) | `PNPM_VERSION=next`                               |
+| **PNPM_VERSION**  | _version | `latest` by default. The pnpm version to be installed.<br>(not older than `pnpm@6.27.2`) | `PNPM_VERSION=6.31.0`                               |
