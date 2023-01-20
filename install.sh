@@ -80,6 +80,10 @@ detect_arch() {
   printf '%s' "${arch}"
 }
 
+is_apline() {
+  test -f "/etc/alpine-release"
+}
+
 download_and_install() {
   local platform arch pkgName version_json version archive_url tmp_dir
   platform="$(detect_platform)"
@@ -90,21 +94,26 @@ download_and_install() {
   else
     version="${PNPM_VERSION}"
   fi
-  pkgName="@pnpm/${platform}-${arch}"
-  archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
-  validate_url "$archive_url"  || abort "pnpm version '${version}' could not be found"
-
-  # install to PNPM_HOME, defaulting to ~/.pnpm
-  tmp_dir="$(mktemp -d)" || abort "Tmpdir Error!"
-  trap 'rm -rf "$tmp_dir"' EXIT INT TERM HUP
-
-  ohai "Extracting pnpm binaries ${version}"
-  # extract the files to the specified directory
-  download "$archive_url" | tar -xz -C "$tmp_dir" --strip-components=1 || return 1
-  # for some reason with pnpm v7 this artifact stopped being an executable
-  # so this is a workaround to make the CLI executable before running it
-  chmod +x "$tmp_dir/pnpm"
-  SHELL="$SHELL" "$tmp_dir/pnpm" setup || return 1
+  
+  if is_apline; then
+    archive_url="https://github.com/pnpm/pnpm/releases/download/v${version}/pnpm-linuxstatic-${arch}"
+    ohai "Extracting pnpm binaries ${version}"
+    wget -qO /bin/pnpm "$archive_url" && chmod +x /bin/pnpm
+  else 
+    pkgName="@pnpm/${platform}-${arch}"
+    archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
+    validate_url "$archive_url"  || abort "pnpm version '${version}' could not be found"
+    # install to PNPM_HOME, defaulting to ~/.pnpm
+    tmp_dir="$(mktemp -d)" || abort "Tmpdir Error!"
+    trap 'rm -rf "$tmp_dir"' EXIT INT TERM HUP
+    ohai "Extracting pnpm binaries ${version}"
+    # extract the files to the specified directory
+    download "$archive_url" | tar -xz -C "$tmp_dir" --strip-components=1 || return 1
+    # for some reason with pnpm v7 this artifact stopped being an executable
+    # so this is a workaround to make the CLI executable before running it
+    chmod +x "$tmp_dir/pnpm"
+    SHELL="$SHELL" "$tmp_dir/pnpm" setup || return 1
+  fi
 }
 
 download_and_install || abort "Install Error!"
