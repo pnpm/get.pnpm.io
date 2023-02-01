@@ -5,6 +5,13 @@ $ErrorActionPreference = 'Stop'
 # Do not show download progress
 $ProgressPreference = 'SilentlyContinue'
 
+# Taken from https://stackoverflow.com/a/34559554/6537420
+function New-TemporaryDirectory {
+  $parent = [System.IO.Path]::GetTempPath()
+  [string] $name = [System.Guid]::NewGuid()
+  New-Item -ItemType Directory -Path (Join-Path $parent $name)
+}
+
 $platform = $null
 $architecture = $null
 $pnpmName = $null
@@ -19,11 +26,11 @@ if ($PSVersionTable.PSVersion.Major -ge 6) {
     if ($PSVersionTable.OS -like 'Darwin*') {
       $platform = 'macos'
     }
-    
+
     if ($PSVersionTable.OS -like 'Linux*') {
       $platform = 'linux'
     }
-    
+
     # PowerShell does not seem to have normal cmdlets for retrieving system information, so we use UNAME(1) for this.
     $arch = uname -m
     switch -Wildcard ($arch) {
@@ -47,7 +54,7 @@ if ($PSVersionTable.PSVersion.Major -ge 6) {
 
     $pnpmName = "pnpm"
   }
-  
+
   if ($PSVersionTable.Platform -eq 'Win32NT') {
     $platform = 'win'
   }
@@ -57,7 +64,7 @@ if ($platform -eq 'win') {
   if ([System.Environment]::Is64BitOperatingSystem -eq $true) {
     $architecture = 'x64'
   }
-  
+
   if ([System.Environment]::Is64BitOperatingSystem -eq $false) {
     $architecture = 'i686'
   }
@@ -109,30 +116,23 @@ if ($null -eq $version) {
   Write-Error "Sorry! pnpm '$preferredVersion' version could not be found. Use one of the tags or published versions from the provided list"
 }
 
-$pkgName = "@pnpm/$platform-$architecture"
+Write-Host "Downloading pnpm from GitHub...`n" -ForegroundColor Green
 
-Write-Host "Downloading '$pkgName' from 'npmjs.com' registry...`n" -ForegroundColor Green
-
-$tempFile = New-TemporaryFile
-$archiveUrl = "https://registry.npmjs.org/$pkgName/-/$platform-$architecture-$version.tgz"
+$tempFileFolder = New-TemporaryDirectory
+$tempFile = (Join-Path $tempFileFolder.FullName "pnpm")
+$archiveUrl="https://github.com/pnpm/pnpm/releases/download/v$version/pnpm-$platform-$architecture"
+if ($platform -eq 'win') {
+  $archiveUrl="$archiveUrl.exe"
+}
 Invoke-WebRequest $archiveUrl -OutFile $tempFile -UseBasicParsing
-
-$tempFilePath = $tempFile.FullName
-$tempFileFolder = "$tempFilePath.extracted"
-
-Write-Host "Extracting downloaded '$version' archive...`n" -ForegroundColor Green
-
-$null = New-Item -ItemType Directory -Path $tempFileFolder
-
-# 'tar.exe' exists on Windows OS as of version 1903, so this will fail in earlier versions unless 3rd party utility is installed 
-tar -xf $tempFilePath -C $tempFileFolder
-
-$exec = Get-ChildItem $tempFileFolder -Filter $pnpmName -Recurse -ErrorAction SilentlyContinue
-$pnpmPath = $exec.FullName
 
 Write-Host "Running setup...`n" -ForegroundColor Green
 
-Start-Process -FilePath $pnpmPath -ArgumentList "setup" -NoNewWindow -Wait -ErrorAction Continue
+if ($platform -ne 'win') {
+  chmod +x $tempFile
+}
 
-Remove-Item $tempFilePath
+Start-Process -FilePath $tempFile -ArgumentList "setup" -NoNewWindow -Wait -ErrorAction Continue
+
+Remove-Item $tempFile
 Remove-Item $tempFileFolder -Recurse

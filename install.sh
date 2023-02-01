@@ -32,7 +32,8 @@ download() {
 }
 
 validate_url() {
-  local url="$1"
+  local url
+  url="$1"
 
   if command -v curl > /dev/null 2>&1; then
     curl --output /dev/null --silent --show-error --location --head --fail "$url"
@@ -59,8 +60,7 @@ detect_arch() {
   arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
 
   case "${arch}" in
-    x86_64) arch="x64" ;;
-    amd64) arch="x64" ;;
+    x86_64 | amd64) arch="x64" ;;
     armv*) arch="arm" ;;
     arm64 | aarch64) arch="arm64" ;;
   esac
@@ -81,7 +81,7 @@ detect_arch() {
 }
 
 download_and_install() {
-  local platform arch pkgName version_json version archive_url tmp_dir
+  local platform arch version_json version archive_url tmp_dir
   platform="$(detect_platform)"
   arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
   if [ -z "${PNPM_VERSION}" ]; then
@@ -90,19 +90,21 @@ download_and_install() {
   else
     version="${PNPM_VERSION}"
   fi
-  pkgName="@pnpm/${platform}-${arch}"
-  archive_url="https://registry.npmjs.org/${pkgName}/-/${platform}-${arch}-${version}.tgz"
+
+  archive_url="https://github.com/pnpm/pnpm/releases/download/v${version}/pnpm-${platform}-${arch}"
+  if [ "${platform}" = "win" ]; then
+    archive_url="${archive_url}.exe"
+  fi
+
   validate_url "$archive_url"  || abort "pnpm version '${version}' could not be found"
 
   # install to PNPM_HOME, defaulting to ~/.pnpm
   tmp_dir="$(mktemp -d)" || abort "Tmpdir Error!"
   trap 'rm -rf "$tmp_dir"' EXIT INT TERM HUP
 
-  ohai "Extracting pnpm binaries ${version}"
-  # extract the files to the specified directory
-  download "$archive_url" | tar -xz -C "$tmp_dir" --strip-components=1 || return 1
-  # for some reason with pnpm v7 this artifact stopped being an executable
-  # so this is a workaround to make the CLI executable before running it
+  ohai "Downloading pnpm binaries ${version}"
+  # download the binary to the specified directory
+  download "$archive_url" > "$tmp_dir/pnpm"  || return 1
   chmod +x "$tmp_dir/pnpm"
   SHELL="$SHELL" "$tmp_dir/pnpm" setup || return 1
 }
