@@ -1,0 +1,28 @@
+name: Install on Alpine Linux
+
+on:
+  - push
+  - pull_request
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    container: alpine:latest
+    strategy:
+      matrix:
+        shell:
+          - bash
+          - dash
+          - sh
+          # - zsh
+        script:
+          - install.sh
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install shell
+        run: apk add ${{ matrix.shell }}
+        if: ${{ matrix.shell != 'sh' }}
+      - name: Run installation script
+        run: ENV="~/.${{ matrix.shell }}rc" SHELL="$(which ${{ matrix.shell }})" ${{ matrix.shell }} ${{ matrix.script }}

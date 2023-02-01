@@ -42,12 +42,22 @@ validate_url() {
   fi
 }
 
+is_glibc_compatible() {
+  getconf GNU_LIBC_VERSION >/dev/null 2>&1 || ldd --version >/dev/null 2>&1 || return 1
+}
+
 detect_platform() {
   local platform
   platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
   case "${platform}" in
-    linux) platform="linux" ;;
+    linux)
+      if is_glibc_compatible; then
+        platform="linux"
+      else
+        platform="linuxstatic"
+      fi
+      ;;
     darwin) platform="macos" ;;
     windows) platform="win" ;;
   esac
