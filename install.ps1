@@ -119,7 +119,7 @@ if ($null -eq $version) {
 Write-Host "Downloading pnpm from GitHub...`n" -ForegroundColor Green
 
 $tempFileFolder = New-TemporaryDirectory
-$tempFile = (Join-Path $tempFileFolder.FullName "pnpm")
+$tempFile = (Join-Path $tempFileFolder.FullName $pnpmName)
 $archiveUrl="https://github.com/pnpm/pnpm/releases/download/v$version/pnpm-$platform-$architecture"
 if ($platform -eq 'win') {
   $archiveUrl="$archiveUrl.exe"
