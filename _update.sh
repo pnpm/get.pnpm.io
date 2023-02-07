@@ -1,3 +1,4 @@
+set -e
 rm SHASUMS256.txt SHASUMS256.txt.sig
 {
   sha256sum v6.js;

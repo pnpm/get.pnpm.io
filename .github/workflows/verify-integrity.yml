@@ -1,0 +1,13 @@
+name: Verify integrity
+
+on:
+  - push
+  - pull_request
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Verify integrity
+        run: sh ./_check.sh
