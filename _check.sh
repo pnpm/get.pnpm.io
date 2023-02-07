@@ -1,3 +1,4 @@
+set -e
 grep v6.js SHASUMS256.txt | sha256sum -c -
 grep v6.6.js SHASUMS256.txt | sha256sum -c -
 grep v6.7.js SHASUMS256.txt | sha256sum -c -
