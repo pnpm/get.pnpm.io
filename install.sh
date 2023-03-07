@@ -116,7 +116,7 @@ download_and_install() {
   # download the binary to the specified directory
   download "$archive_url" > "$tmp_dir/pnpm"  || return 1
   chmod +x "$tmp_dir/pnpm"
-  SHELL="$SHELL" "$tmp_dir/pnpm" setup || return 1
+  SHELL="$SHELL" "$tmp_dir/pnpm" setup --force || return 1
 }
 
 download_and_install || abort "Install Error!"
