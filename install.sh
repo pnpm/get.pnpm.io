@@ -31,17 +31,6 @@ download() {
   fi
 }
 
-validate_url() {
-  local url
-  url="$1"
-
-  if command -v curl > /dev/null 2>&1; then
-    curl --output /dev/null --silent --show-error --location --head --fail "$url"
-  else
-    wget --spider --quiet "$url"
-  fi
-}
-
 is_glibc_compatible() {
   getconf GNU_LIBC_VERSION >/dev/null 2>&1 || ldd --version >/dev/null 2>&1 || return 1
 }
@@ -105,8 +94,6 @@ download_and_install() {
   if [ "${platform}" = "win" ]; then
     archive_url="${archive_url}.exe"
   fi
-
-  validate_url "$archive_url"  || abort "pnpm version '${version}' could not be found"
 
   # install to PNPM_HOME, defaulting to ~/.pnpm
   tmp_dir="$(mktemp -d)" || abort "Tmpdir Error!"
