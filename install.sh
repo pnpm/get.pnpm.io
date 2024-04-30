@@ -49,6 +49,7 @@ detect_platform() {
       ;;
     darwin) platform="macos" ;;
     windows) platform="win" ;;
+    mingw*) platform="win" ;;
   esac
 
   printf '%s' "${platform}"
