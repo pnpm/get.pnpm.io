@@ -23,16 +23,13 @@ if ($PSVersionTable.PSVersion.Major -eq 5) {
 
 if ($PSVersionTable.PSVersion.Major -ge 6) {
   if ($PSVersionTable.Platform -eq 'Unix') {
-    if ($PSVersionTable.OS -like 'Darwin*') {
-      $platform = 'macos'
-    }
-
-    if ($PSVersionTable.OS -like 'Linux*') {
-      $platform = 'linux'
-    }
-
-    if ($PSVersionTable.OS -like 'Ubuntu*') {
-      $platform = 'linux'
+    switch -Wildcard ($PSVersionTable.OS) {
+      'Darwin*' {
+        $platform = 'macos'
+      }
+      'Linux*', 'Ubuntu*' {
+        $platform = 'linux'
+      }
     }
 
     # PowerShell does not seem to have normal cmdlets for retrieving system information, so we use UNAME(1) for this.
