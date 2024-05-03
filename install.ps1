@@ -27,7 +27,10 @@ if ($PSVersionTable.PSVersion.Major -ge 6) {
       'Darwin*' {
         $platform = 'macos'
       }
-      'Linux*', 'Ubuntu*' {
+      'Linux*' {
+        $platform = 'linux'
+      }
+      'Ubuntu*' {
         $platform = 'linux'
       }
     }
