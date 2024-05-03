@@ -31,6 +31,10 @@ if ($PSVersionTable.PSVersion.Major -ge 6) {
       $platform = 'linux'
     }
 
+    if ($PSVersionTable.OS -like 'Ubuntu*') {
+      $platform = 'linux'
+    }
+
     # PowerShell does not seem to have normal cmdlets for retrieving system information, so we use UNAME(1) for this.
     $arch = uname -m
     switch -Wildcard ($arch) {
