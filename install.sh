@@ -86,7 +86,7 @@ download_and_install() {
   arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
   if [ -z "${PNPM_VERSION}" ]; then
     version_json="$(download "https://registry.npmjs.org/@pnpm/exe")" || abort "Download Error!"
-    version="$(printf '%s' "${version_json}" | tr '{' '\n' | awk -F '"' '/latest/ { print $4 }')"
+    version="$(echo "$version_json" | grep -o '"latest":[[:space:]]*"[0-9.]*"' | grep -o '[0-9.]*')"
   else
     version="${PNPM_VERSION}"
   fi
