@@ -101,7 +101,7 @@ download_and_install() {
   # Use double quotes with single-quoted variable to interpolate at trap setup time.
   # This ensures the directory path is captured even if tmp_dir goes out of scope.
   # shellcheck disable=SC2064
-  trap "rm -rf '$tmp_dir'" EXIT INT TERM HUP
+  trap "rm -rf $tmp_dir" EXIT INT TERM HUP
 
   ohai "Downloading pnpm binaries ${version}"
   # download the binary to the specified directory
