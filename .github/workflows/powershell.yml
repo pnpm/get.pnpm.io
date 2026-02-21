@@ -19,9 +19,34 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Run on UN*X
+        env:
+          PNPM_HOME: /tmp/pnpm-home
         run: pwsh install.ps1
         if: ${{ matrix.runs-on == 'macos-latest' || matrix.runs-on == 'ubuntu-latest' }}
       - name: Run on Windows
-        run: powershell -NoProfile -ExecutionPolicy Unrestricted ./install.ps1
         shell: pwsh
+        run: |
+          $env:PNPM_HOME = Join-Path $env:RUNNER_TEMP "pnpm-home"
+          powershell -NoProfile -ExecutionPolicy Unrestricted ./install.ps1
         if: ${{ matrix.runs-on == 'windows-latest' }}
+      - name: Verify pnpm works (Unix)
+        if: ${{ matrix.runs-on == 'macos-latest' || matrix.runs-on == 'ubuntu-latest' }}
+        run: |
+          tmpdir=$(mktemp -d)
+          cd "$tmpdir"
+          echo '{}' > package.json
+          PATH="/tmp/pnpm-home:$PATH" PNPM_HOME=/tmp/pnpm-home pnpm add webpack
+          test -f node_modules/webpack/package.json
+      - name: Verify pnpm works (Windows)
+        if: ${{ matrix.runs-on == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          $pnpmHome = Join-Path $env:RUNNER_TEMP "pnpm-home"
+          $env:PATH = "$pnpmHome;$env:PATH"
+          $env:PNPM_HOME = $pnpmHome
+          $tmpdir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+          New-Item -ItemType Directory -Path $tmpdir | Out-Null
+          Set-Location $tmpdir
+          Set-Content package.json '{}'
+          pnpm add webpack
+          if (-not (Test-Path node_modules/webpack/package.json)) { throw "webpack was not installed" }

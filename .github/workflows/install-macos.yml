@@ -26,4 +26,13 @@ jobs:
         run: brew install ${{ matrix.shell }}
         if: ${{ matrix.shell == 'ksh' || matrix.shell == 'dash' }}
       - name: Run installation script
+        env:
+          PNPM_HOME: /tmp/pnpm-home
         run: ENV="~/.${{ matrix.shell }}rc" SHELL="$(which ${{ matrix.shell }})" ${{ matrix.shell }} ${{ matrix.script }}
+      - name: Verify pnpm works
+        run: |
+          tmpdir=$(mktemp -d)
+          cd "$tmpdir"
+          echo '{}' > package.json
+          PATH="/tmp/pnpm-home:$PATH" PNPM_HOME=/tmp/pnpm-home pnpm add webpack
+          test -f node_modules/webpack/package.json
