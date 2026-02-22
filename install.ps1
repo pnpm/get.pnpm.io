@@ -158,4 +158,4 @@ if ($platform -ne 'win') {
 
 Start-Process -FilePath $tempFile -ArgumentList "setup" -NoNewWindow -Wait -ErrorAction Continue
 
-Remove-Item $tempFileFolder -Recurse
+Remove-Item $tempFileFolder -Recurse -Force
