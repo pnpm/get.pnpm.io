@@ -81,7 +81,7 @@ detect_arch() {
 }
 
 download_and_install() {
-  local platform arch version_json version archive_url tmp_dir
+  local platform arch version_json version tmp_dir major_version
   platform="$(detect_platform)"
   arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
   if [ -z "${PNPM_VERSION}" ]; then
@@ -89,11 +89,6 @@ download_and_install() {
     version="$(echo "$version_json" | grep -o '"latest":[[:space:]]*"[0-9.]*"' | grep -o '[0-9.]*')"
   else
     version="${PNPM_VERSION}"
-  fi
-
-  archive_url="https://github.com/pnpm/pnpm/releases/download/v${version}/pnpm-${platform}-${arch}"
-  if [ "${platform}" = "win" ]; then
-    archive_url="${archive_url}.exe"
   fi
 
   # install to PNPM_HOME, defaulting to ~/.pnpm
@@ -104,10 +99,30 @@ download_and_install() {
   trap "rm -rf '$tmp_dir'" EXIT INT TERM HUP
 
   ohai "Downloading pnpm binaries ${version}"
-  # download the binary to the specified directory
-  download "$archive_url" > "$tmp_dir/pnpm"  || return 1
-  chmod +x "$tmp_dir/pnpm"
-  SHELL="$SHELL" "$tmp_dir/pnpm" setup --force || return 1
+  major_version="$(echo "$version" | cut -d. -f1)"
+  if [ "$major_version" -ge 11 ] 2>/dev/null; then
+    # v11+: distributed as tarballs containing the binary and dist/ directory
+    if [ "${platform}" = "win" ]; then
+      download "https://github.com/pnpm/pnpm/releases/download/v${version}/pnpm-${platform}-${arch}.zip" > "$tmp_dir/pnpm.zip" || return 1
+      unzip -q "$tmp_dir/pnpm.zip" -d "$tmp_dir" || return 1
+      SHELL="$SHELL" "$tmp_dir/pnpm.exe" setup --force || return 1
+    else
+      download "https://github.com/pnpm/pnpm/releases/download/v${version}/pnpm-${platform}-${arch}.tar.gz" > "$tmp_dir/pnpm.tar.gz" || return 1
+      tar -xzf "$tmp_dir/pnpm.tar.gz" -C "$tmp_dir" || return 1
+      chmod +x "$tmp_dir/pnpm"
+      SHELL="$SHELL" "$tmp_dir/pnpm" setup --force || return 1
+    fi
+  else
+    # older versions: distributed as a single executable binary
+    local archive_url
+    archive_url="https://github.com/pnpm/pnpm/releases/download/v${version}/pnpm-${platform}-${arch}"
+    if [ "${platform}" = "win" ]; then
+      archive_url="${archive_url}.exe"
+    fi
+    download "$archive_url" > "$tmp_dir/pnpm" || return 1
+    chmod +x "$tmp_dir/pnpm"
+    SHELL="$SHELL" "$tmp_dir/pnpm" setup --force || return 1
+  fi
 }
 
 download_and_install || abort "Install Error!"

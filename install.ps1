@@ -123,12 +123,32 @@ if ($null -eq $version) {
 Write-Host "Downloading pnpm from GitHub...`n" -ForegroundColor Green
 
 $tempFileFolder = New-TemporaryDirectory
-$tempFile = (Join-Path $tempFileFolder.FullName $pnpmName)
-$archiveUrl="https://github.com/pnpm/pnpm/releases/download/v$version/pnpm-$platform-$architecture"
-if ($platform -eq 'win') {
-  $archiveUrl="$archiveUrl.exe"
+$majorVersion = [int]($version -split '\.')[0]
+
+if ($majorVersion -ge 11) {
+  # v11+: distributed as tarballs containing the binary and dist/ directory
+  if ($platform -eq 'win') {
+    $archiveUrl = "https://github.com/pnpm/pnpm/releases/download/v$version/pnpm-$platform-$architecture.zip"
+    $tempArchive = Join-Path $tempFileFolder.FullName "pnpm.zip"
+    Invoke-WebRequest $archiveUrl -OutFile $tempArchive -UseBasicParsing
+    Expand-Archive -Path $tempArchive -DestinationPath $tempFileFolder.FullName -Force
+    $tempFile = Join-Path $tempFileFolder.FullName "pnpm.exe"
+  } else {
+    $archiveUrl = "https://github.com/pnpm/pnpm/releases/download/v$version/pnpm-$platform-$architecture.tar.gz"
+    $tempArchive = Join-Path $tempFileFolder.FullName "pnpm.tar.gz"
+    Invoke-WebRequest $archiveUrl -OutFile $tempArchive -UseBasicParsing
+    tar -xzf $tempArchive -C $tempFileFolder.FullName
+    $tempFile = Join-Path $tempFileFolder.FullName "pnpm"
+  }
+} else {
+  # older versions: distributed as a single executable binary
+  $archiveUrl = "https://github.com/pnpm/pnpm/releases/download/v$version/pnpm-$platform-$architecture"
+  if ($platform -eq 'win') {
+    $archiveUrl = "$archiveUrl.exe"
+  }
+  $tempFile = Join-Path $tempFileFolder.FullName $pnpmName
+  Invoke-WebRequest $archiveUrl -OutFile $tempFile -UseBasicParsing
 }
-Invoke-WebRequest $archiveUrl -OutFile $tempFile -UseBasicParsing
 
 Write-Host "Running setup...`n" -ForegroundColor Green
 
@@ -138,5 +158,4 @@ if ($platform -ne 'win') {
 
 Start-Process -FilePath $tempFile -ArgumentList "setup" -NoNewWindow -Wait -ErrorAction Continue
 
-Remove-Item $tempFile
-Remove-Item $tempFileFolder -Recurse
+Remove-Item $tempFileFolder -Recurse -Force
