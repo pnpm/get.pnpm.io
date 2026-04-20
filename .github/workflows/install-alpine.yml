@@ -27,6 +27,13 @@ jobs:
       - name: Install shell
         run: apk add ${{ matrix.shell }}
         if: ${{ matrix.shell != 'sh' }}
+      - name: Install pnpm runtime dependencies
+        # The unofficial musl Node.js build (nodejs/unofficial-builds) pnpm
+        # embeds in its standalone binary isn't fully statically linked — it
+        # has dynamic deps on libstdc++.so.6 and libgcc_s.so.1. They aren't in
+        # the minimal alpine:latest image by default, so install them here
+        # before running the install script. See pnpm/pnpm#11317.
+        run: apk add libstdc++ libgcc
       - name: Resolve pnpm version
         run: |
           tag="${{ matrix.pnpm_version }}"
