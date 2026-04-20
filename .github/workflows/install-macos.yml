@@ -47,5 +47,6 @@ jobs:
           tmpdir=$(mktemp -d)
           cd "$tmpdir"
           echo '{}' > package.json
-          PATH="/tmp/pnpm-home:$PATH" PNPM_HOME=/tmp/pnpm-home pnpm add webpack
+          # pnpm setup places the binary in $PNPM_HOME/bin, not $PNPM_HOME.
+          PATH="/tmp/pnpm-home/bin:$PATH" PNPM_HOME=/tmp/pnpm-home pnpm add webpack
           test -f node_modules/webpack/package.json

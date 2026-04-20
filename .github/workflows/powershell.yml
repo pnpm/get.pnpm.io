@@ -40,14 +40,16 @@ jobs:
           tmpdir=$(mktemp -d)
           cd "$tmpdir"
           echo '{}' > package.json
-          PATH="/tmp/pnpm-home:$PATH" PNPM_HOME=/tmp/pnpm-home pnpm add webpack
+          # pnpm setup places the binary in $PNPM_HOME/bin, not $PNPM_HOME.
+          PATH="/tmp/pnpm-home/bin:$PATH" PNPM_HOME=/tmp/pnpm-home pnpm add webpack
           test -f node_modules/webpack/package.json
       - name: Verify pnpm works (Windows)
         if: ${{ matrix.runs-on == 'windows-latest' }}
         shell: pwsh
         run: |
           $pnpmHome = Join-Path $env:RUNNER_TEMP "pnpm-home"
-          $env:PATH = "$pnpmHome;$env:PATH"
+          $pnpmBin = Join-Path $pnpmHome "bin"
+          $env:PATH = "$pnpmBin;$env:PATH"
           $env:PNPM_HOME = $pnpmHome
           $tmpdir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
           New-Item -ItemType Directory -Path $tmpdir | Out-Null
