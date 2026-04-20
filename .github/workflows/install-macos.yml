@@ -47,6 +47,8 @@ jobs:
           tmpdir=$(mktemp -d)
           cd "$tmpdir"
           echo '{}' > package.json
-          # pnpm setup places the binary in $PNPM_HOME/bin, not $PNPM_HOME.
-          PATH="/tmp/pnpm-home/bin:$PATH" PNPM_HOME=/tmp/pnpm-home pnpm add webpack
+          # v10 pnpm setup places the binary at $PNPM_HOME/pnpm; v11+ at
+          # $PNPM_HOME/bin/pnpm. Prepend both so the verify step works across
+          # every test matrix cell.
+          PATH="/tmp/pnpm-home/bin:/tmp/pnpm-home:$PATH" PNPM_HOME=/tmp/pnpm-home pnpm add webpack
           test -f node_modules/webpack/package.json
