@@ -147,6 +147,28 @@ download_and_install() {
     version="${PNPM_VERSION}"
   fi
 
+  # Intel macOS isn't supported from pnpm v11 onward: the SEA binary
+  # produced by Node.js for darwin-x64 segfaults at startup because of an
+  # upstream Node.js bug the Node.js team has decided not to fix (Intel
+  # macOS is being phased out). Without this guard the script would 404
+  # on pnpm-darwin-x64.tar.gz and surface as a generic "Install Error!".
+  # See https://github.com/pnpm/pnpm/issues/11423 and
+  # https://github.com/nodejs/node/issues/62893.
+  if [ "${platform}" = "darwin" ] && [ "${arch}" = "x64" ]; then
+    major_version="$(echo "$version" | cut -d. -f1)"
+    if [ "$major_version" -ge 11 ] 2>/dev/null; then
+      abort \
+        "pnpm v${version} does not provide a working binary for Intel macOS (darwin-x64) due to an upstream Node.js SEA bug." \
+        "" \
+        "Install pnpm a different way instead:" \
+        "  npm install -g pnpm           # uses your system Node.js" \
+        "  brew install pnpm             # via Homebrew" \
+        "  corepack enable pnpm          # bundled with Node.js" \
+        "" \
+        "More context: https://github.com/pnpm/pnpm/issues/11423"
+    fi
+  fi
+
   # install to PNPM_HOME, defaulting to ~/.pnpm
   tmp_dir="$(mktemp -d)" || abort "Tmpdir Error!"
   # Use double quotes with single-quoted variable to interpolate at trap setup time.
