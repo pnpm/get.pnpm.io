@@ -147,6 +147,35 @@ download_and_install() {
     version="${PNPM_VERSION}"
   fi
 
+  # Compute the major version once. Strip an optional leading "v" so
+  # PNPM_VERSION=v11.0.0 normalizes the same as 11.0.0; the second sed
+  # captures only the leading digits so prereleases like 11.0.0-rc.1
+  # resolve to 11. A bare `cut -d. -f1` would leave a "v" or non-digit
+  # prefix in the value, fail the numeric -ge test silently (the existing
+  # `2>/dev/null` suppression hid the parse error), and skip every
+  # major-gated branch below.
+  major_version="$(printf '%s' "$version" | sed -E 's/^v//; s/^([0-9]+).*/\1/')"
+  [ -n "$major_version" ] || abort "Invalid PNPM_VERSION: $version"
+
+  # Intel macOS isn't supported from pnpm v11 onward: the SEA binary
+  # produced by Node.js for darwin-x64 segfaults at startup because of an
+  # upstream Node.js bug the Node.js team has decided not to fix (Intel
+  # macOS is being phased out). Without this guard the script would 404
+  # on pnpm-darwin-x64.tar.gz and surface as a generic "Install Error!".
+  # See https://github.com/pnpm/pnpm/issues/11423 and
+  # https://github.com/nodejs/node/issues/62893.
+  if [ "${platform}" = "darwin" ] && [ "${arch}" = "x64" ] && [ "$major_version" -ge 11 ]; then
+    abort \
+      "pnpm v${version} does not provide a working binary for Intel macOS (darwin-x64) due to an upstream Node.js SEA bug." \
+      "" \
+      "Install pnpm a different way instead:" \
+      "  npm install -g pnpm           # uses your system Node.js" \
+      "  brew install pnpm             # via Homebrew" \
+      "  corepack enable pnpm          # bundled with Node.js" \
+      "" \
+      "More context: https://github.com/pnpm/pnpm/issues/11423"
+  fi
+
   # install to PNPM_HOME, defaulting to ~/.pnpm
   tmp_dir="$(mktemp -d)" || abort "Tmpdir Error!"
   # Use double quotes with single-quoted variable to interpolate at trap setup time.
@@ -155,9 +184,8 @@ download_and_install() {
   trap "rm -rf '$tmp_dir'" EXIT INT TERM HUP
 
   ohai "Downloading pnpm binaries ${version}"
-  major_version="$(echo "$version" | cut -d. -f1)"
   asset_base="$(asset_basename "$version" "$platform" "$arch" "$libc_suffix")"
-  if [ "$major_version" -ge 11 ] 2>/dev/null; then
+  if [ "$major_version" -ge 11 ]; then
     # v11+: distributed as tarballs containing the binary and dist/ directory
     if [ "${platform}" = "win32" ]; then
       download "https://github.com/pnpm/pnpm/releases/download/v${version}/${asset_base}.zip" > "$tmp_dir/pnpm.zip" || return 1
