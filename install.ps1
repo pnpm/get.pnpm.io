@@ -32,6 +32,11 @@ if ($PSVersionTable.PSVersion.Major -ge 6) {
       'Darwin*' {
         $platform = 'darwin'
       }
+      # PowerShell 7.6+ (built on .NET 10) reports a friendly name like
+      # "macOS 26.4" instead of the Darwin kernel string.
+      'macOS*' {
+        $platform = 'darwin'
+      }
       'Linux*' {
         $platform = 'linux'
       }
