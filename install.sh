@@ -157,14 +157,15 @@ download_and_install() {
   major_version="$(printf '%s' "$version" | sed -E 's/^v//; s/^([0-9]+).*/\1/')"
   [ -n "$major_version" ] || abort "Invalid PNPM_VERSION: $version"
 
-  # Intel macOS isn't supported from pnpm v11 onward: the SEA binary
-  # produced by Node.js for darwin-x64 segfaults at startup because of an
-  # upstream Node.js bug the Node.js team has decided not to fix (Intel
-  # macOS is being phased out). Without this guard the script would 404
-  # on pnpm-darwin-x64.tar.gz and surface as a generic "Install Error!".
+  # Intel macOS isn't supported on pnpm v11 only: the SEA binary produced
+  # by Node.js for darwin-x64 segfaults at startup because of an upstream
+  # Node.js bug the Node.js team has decided not to fix (Intel macOS is
+  # being phased out). Without this guard the script would 404 on
+  # pnpm-darwin-x64.tar.gz and surface as a generic "Install Error!".
+  # v12 (the Rust port) ships darwin-x64 again, so the guard is v11-bound.
   # See https://github.com/pnpm/pnpm/issues/11423 and
   # https://github.com/nodejs/node/issues/62893.
-  if [ "${platform}" = "darwin" ] && [ "${arch}" = "x64" ] && [ "$major_version" -ge 11 ]; then
+  if [ "${platform}" = "darwin" ] && [ "${arch}" = "x64" ] && [ "$major_version" -eq 11 ]; then
     abort \
       "pnpm v${version} does not provide a working binary for Intel macOS (darwin-x64) due to an upstream Node.js SEA bug." \
       "" \
