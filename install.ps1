@@ -186,7 +186,10 @@ function Test-NpmSignature {
       [System.Security.Cryptography.HashAlgorithmName]::SHA256,
       [System.Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence)
   } catch {
-    return $null
+    # Past the version check the runtime can verify, so a throw here means the
+    # signature itself did not parse. Treating that as "cannot check" would let
+    # a malformed signature buy a downgrade to the checksum alone.
+    return $false
   }
 }
 
@@ -242,6 +245,11 @@ function Get-VerifiedPackage {
   }
   New-Item -ItemType Directory -Path $unpacked | Out-Null
   tar -xzf $archive -C $unpacked
+  # $ErrorActionPreference does not cover the exit code of a native command, so
+  # a failed unpack would otherwise surface later as a missing-path error.
+  if ($LASTEXITCODE -ne 0) {
+    throw "Could not unpack $Package@$Version."
+  }
   Remove-Item $archive -Force
   return (Join-Path $unpacked 'package')
 }

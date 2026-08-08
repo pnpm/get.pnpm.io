@@ -110,14 +110,17 @@ nor a tampered checksum passes, because the key that signs them is not one the d
 host can mint. The executable is identical to the one on the GitHub release page.
 
 Signature checking needs `openssl` (POSIX) or PowerShell 7 (Windows). Without them the
-installer falls back to the checksum alone and says so.
+installer says so and checks the download against the registry's checksum only — which,
+coming from the same host as the download, catches corruption rather than tampering.
 
 pnpm 11 and older are downloaded from the GitHub release page, which publishes no
 signature, so those downloads are not verified. To check one yourself, GitHub attests
-every release asset:
+every release asset — name the file you downloaded, which for pnpm 11 and older follows
+the older scheme (`pnpm-macos-*`, `pnpm-win-*`, `pnpm-linuxstatic-*`):
 
 ```sh
-gh attestation verify pnpm-linux-x64.tar.gz --repo pnpm/pnpm
+gh attestation verify pnpm-linux-x64.tar.gz --repo pnpm/pnpm    # v11+
+gh attestation verify pnpm-macos-arm64 --repo pnpm/pnpm         # v10 and older
 ```
 
 That confirms the file was built by pnpm's release workflow from the signed release tag,

@@ -69,7 +69,14 @@ verify_npm_signature() {
   signature="$2"
   dir="$3"
   command -v openssl > /dev/null 2>&1 || return 2
-  printf -- '-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----\n' "$NPM_SIGNING_KEY" > "$dir/npm-key.pem"
+  # RFC 7468 wants the base64 body wrapped at 64 columns. OpenSSL tolerates one
+  # long line; not every parser does, and a rejected key would be reported here
+  # as a bad signature.
+  {
+    printf -- '-----BEGIN PUBLIC KEY-----\n'
+    printf '%s\n' "$NPM_SIGNING_KEY" | fold -w 64
+    printf -- '-----END PUBLIC KEY-----\n'
+  } > "$dir/npm-key.pem"
   printf '%s' "$signature" | openssl base64 -d -A > "$dir/npm-sig.bin" 2>/dev/null || return 1
   printf '%s' "$message" > "$dir/npm-msg"
   openssl dgst -sha256 -verify "$dir/npm-key.pem" -signature "$dir/npm-sig.bin" "$dir/npm-msg" > /dev/null 2>&1
@@ -273,6 +280,13 @@ download_and_install() {
         "PNPM_VERSION takes a version or one of these tags:" \
         "$(dist_tags "$version_json")"
       ;;
+  esac
+
+  # Everything below builds URLs out of this value, so keep it to the shape of
+  # a version. Without this `PNPM_VERSION=12.0.0/../../@evil/pkg` passes the
+  # major-version test and changes which path is requested.
+  case "$version" in
+    '' | *[!0-9A-Za-z.+-]*) abort "Invalid pnpm version: $version" ;;
   esac
 
   # Compute the major version once. Strip an optional leading "v" so
