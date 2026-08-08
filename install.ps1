@@ -18,7 +18,7 @@ $pnpmName = $null
 $libcSuffix = ''
 
 # Detect the OS portion of the target triplet using `process.platform`-style
-# names (`linux`, `darwin`, `win32`) — the scheme pnpm's own platform packages
+# names (`linux`, `darwin`, `win32`) - the scheme pnpm's own platform packages
 # and release assets use from v11.0.0-rc.3 onward.
 
 # PowerShell versions before 6.* were only for Windows OS

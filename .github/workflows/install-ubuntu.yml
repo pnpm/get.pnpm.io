@@ -35,7 +35,22 @@ jobs:
           PNPM_VERSION: ${{ matrix.pnpm_version }}
         run: ENV="~/.${{ matrix.shell }}rc" SHELL="$(which ${{ matrix.shell }})" ${{ matrix.shell }} ${{ matrix.script }}
       - name: Verify pnpm works
+        env:
+          PNPM_VERSION: ${{ matrix.pnpm_version }}
         run: |
+          # Prove the cell installed the major it selects. Without this a
+          # mis-wired PNPM_VERSION falls back to `latest`, and a cell that
+          # exists to exercise one code path passes while testing another.
+          case "$PNPM_VERSION" in
+            [0-9]*) expected_major="${PNPM_VERSION%%.*}" ;;
+            *) expected_major="${PNPM_VERSION##*-}" ;;
+          esac
+          export PATH="/tmp/pnpm-home/bin:/tmp/pnpm-home:$PATH"
+          installed="$(PNPM_HOME=/tmp/pnpm-home pnpm --version)"
+          if [ "${installed%%.*}" != "$expected_major" ]; then
+            echo "expected pnpm $expected_major.x, got $installed" >&2
+            exit 1
+          fi
           tmpdir=$(mktemp -d)
           cd "$tmpdir"
           echo '{}' > package.json
