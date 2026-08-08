@@ -64,9 +64,10 @@ expect_refusal() {
   kill "$server_pid" 2>/dev/null || true
   wait "$server_pid" 2>/dev/null || true
 
-  # PowerShell wraps its error text to the host width, so a phrase can arrive
-  # split across lines. Match against a single-spaced copy.
-  flattened="$(printf '%s' "$output" | tr -s ' \t\n' ' ')"
+  # PowerShell wraps its error text to the host width and prefixes the
+  # continuation with a `|` gutter, so a phrase arrives as "is not | valid".
+  # Drop the gutter characters and flatten to single spaces before matching.
+  flattened="$(printf '%s' "$output" | tr -d '|~' | tr -s ' \t\n' ' ')"
 
   if [ "$code" -eq 0 ]; then
     echo "FAIL [$mode] the installer exited 0"
