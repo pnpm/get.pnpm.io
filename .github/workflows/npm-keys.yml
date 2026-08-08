@@ -11,6 +11,12 @@ permissions:
   contents: write
   pull-requests: write
 
+# One rotation at a time: a manual run alongside the weekly one would otherwise
+# race over the same branch.
+concurrency:
+  group: npm-key-rotation
+  cancel-in-progress: false
+
 jobs:
   refresh:
     runs-on: ubuntu-latest
@@ -37,13 +43,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          branch="npm-key-rotation-$(date +%Y%m%d)"
+          # One long-lived branch, force-pushed: a weekly job must not open a
+          # second pull request for a rotation that is already waiting, and a
+          # re-run on the same day must not collide with its own branch.
+          branch=npm-key-rotation
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git checkout -b "$branch"
+          git checkout -B "$branch"
           git commit -am 'chore: refresh the pinned npm signing keys'
-          git push -u origin "$branch"
-          gh pr create --title 'chore: refresh the pinned npm signing keys' --body \
-            'npm rotated its registry signing key. Every installer pins it, so all three files change together.
+          git push --force origin "$branch"
+          if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --head "$branch" --title 'chore: refresh the pinned npm signing keys' --body \
+              'npm rotated its registry signing key. Every installer pins it, so all three files change together.
 
-          The checksums in `SHASUMS256.txt` cover `install.sh` and `install.ps1`, so this needs a re-sign (`./_update.sh`) before merge.'
+            The checksums in `SHASUMS256.txt` cover `install.sh` and `install.ps1`, so this needs a re-sign (`./_update.sh`) before merge.'
+          fi

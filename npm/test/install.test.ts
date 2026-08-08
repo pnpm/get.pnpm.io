@@ -22,7 +22,7 @@ const KEYS: SigningKey[] = [{
 }]
 
 /** One thing broken per run, to drive each refusal separately. */
-type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'unsigned' | 'wrong-keyid'
+type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'unsigned' | 'wrong-keyid' | 'no-integrity'
 
 let tmpDir: string
 let server: http.Server
@@ -67,7 +67,7 @@ describe('installPnpm', { skip: process.platform === 'win32' }, () => {
         json({
           dist: {
             tarball: `${registry}${kind}.tgz`,
-            integrity,
+            ...(mode === 'no-integrity' ? {} : { integrity }),
             signatures: mode === 'unsigned'
               ? []
               : [{
@@ -129,6 +129,11 @@ describe('installPnpm', { skip: process.platform === 'win32' }, () => {
   test('refuses a package signed with a key that is not pinned', async () => {
     mode = 'wrong-keyid'
     await assert.rejects(install, /unexpected npm key/)
+  })
+
+  test('refuses a package the registry published no checksum for', async () => {
+    mode = 'no-integrity'
+    await assert.rejects(install, /published no checksum/)
   })
 })
 

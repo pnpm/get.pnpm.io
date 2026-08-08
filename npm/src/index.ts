@@ -98,23 +98,34 @@ export async function installPnpm (
   const removeTmpDir = (): void => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
   }
-  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
-    process.once(signal, () => {
-      removeTmpDir()
-      process.exit(1)
-    })
+  // Registered for the duration of the call and no longer: this is also a
+  // library function, and handlers left behind would accumulate and outlive the
+  // directory they exist to clean up.
+  const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
+  const onSignal = (): void => {
+    removeTmpDir()
+    process.exit(1)
+  }
+  for (const signal of signals) {
+    process.once(signal, onSignal)
   }
   try {
     console.log(`==> Downloading pnpm ${version}`)
     const executable = process.platform === 'win32' ? 'pnpm.exe' : 'pnpm'
     const fetchPackage = verifiedPackageFetcher({ dir: tmpDir, registry: opts.registry, version, keys: opts.keys })
 
-    const [platformPkg, wrapperPkg] = await Promise.all([
+    // Settled, not `all`: a rejection there would leave the other fetch writing
+    // into the directory the `finally` below is about to remove.
+    const [platformResult, wrapperResult] = await Promise.allSettled([
       fetchPackage(platformPkgName),
       // v11 was the first release to keep files next to the executable; up to
       // v10 the executable is self-contained and ships no `dist/`.
-      major >= 11 ? fetchPackage(wrapperPackageName(major)) : undefined,
+      major >= 11 ? fetchPackage(wrapperPackageName(major)) : Promise.resolve(undefined),
     ])
+    if (platformResult.status === 'rejected') throw platformResult.reason
+    if (wrapperResult.status === 'rejected') throw wrapperResult.reason
+    const platformPkg = platformResult.value
+    const wrapperPkg = wrapperResult.value
 
     const binPath = path.join(tmpDir, executable)
     fs.renameSync(path.join(platformPkg.dir, executable), binPath)
@@ -131,6 +142,9 @@ export async function installPnpm (
     if (error != null) throw error
     return status ?? 1
   } finally {
+    for (const signal of signals) {
+      process.off(signal, onSignal)
+    }
     removeTmpDir()
   }
 }
@@ -165,10 +179,13 @@ function verifiedPackageFetcher (
 ): (pkgName: string) => Promise<{ dir: string }> {
   return async function fetchPackage (pkgName: string): Promise<{ dir: string }> {
     const meta = await fetchVersionMeta(opts.registry, pkgName, opts.version)
+    if (!meta.dist.integrity) {
+      throw new Error(`The npm registry published no checksum for ${pkgName}@${opts.version}, so it cannot be verified.`)
+    }
     verifyRegistrySignature({
       name: pkgName,
       version: opts.version,
-      integrity: meta.dist.integrity ?? '',
+      integrity: meta.dist.integrity,
       signatures: meta.dist.signatures,
       keys: opts.keys,
     })

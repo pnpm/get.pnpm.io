@@ -116,6 +116,20 @@ describe('verifyRegistrySignature', () => {
     assert.throws(() => verifyRegistrySignature({ name, version, integrity, keys, signatures: [] }), /carries no npm registry signature/)
   })
 
+  test('picks the signature made with a pinned key, whatever its position', () => {
+    const rotated = [
+      { keyid: 'SHA256:not-pinned-yet', sig: sign(`${name}@${version}:${integrity}`) },
+      ...signatures,
+    ]
+    verifyRegistrySignature({ name, version, integrity, signatures: rotated, keys })
+  })
+
+  test('rejects a key whose expiry date cannot be read', () => {
+    assert.throws(() => verifyRegistrySignature({
+      name, version, integrity, signatures, keys: [{ ...keys[0]!, expires: 'not a date' }],
+    }), /expiry date cannot be read/)
+  })
+
   test('rejects a key that has expired, and accepts one that has not', () => {
     const expiring = [{ ...keys[0]!, expires: '2020-01-01T00:00:00.000Z' }]
     assert.throws(() => verifyRegistrySignature({ name, version, integrity, signatures, keys: expiring }), /expired on 2020-01-01/)

@@ -35,21 +35,36 @@ export function verifyRegistrySignature (
   }
 ): void {
   const pkg = `${opts.name}@${opts.version}`
-  const signature = opts.signatures?.[0]
-  if (signature == null) {
+  const signatures = opts.signatures ?? []
+  if (signatures.length === 0) {
     throw new Error(`${pkg} carries no npm registry signature, so it cannot be verified.`)
   }
 
+  // Pick the signature by key rather than by position. A package can carry
+  // several, in no guaranteed order, and across a rotation one of them can be
+  // from a key this installer does not pin — which is not a reason to refuse a
+  // package that another, pinned key also signed.
   const keys = opts.keys ?? NPM_SIGNING_KEYS
-  const key = keys.find(({ keyid }) => keyid === signature.keyid)
-  if (key == null) {
-    throw new Error(`${pkg} is signed with an unexpected npm key (${signature.keyid}).
+  const match = signatures
+    .map((signature) => ({ signature, key: keys.find(({ keyid }) => keyid === signature.keyid) }))
+    .find((candidate) => candidate.key != null)
+  if (match?.key == null) {
+    throw new Error(`${pkg} is signed with an unexpected npm key (${signatures.map(({ keyid }) => keyid).join(', ')}).
 
 If npm has rotated its signing key, this installer needs updating.
 Until then, install pnpm another way: https://pnpm.io/installation`)
   }
-  if (key.expires != null && new Date(key.expires) < (opts.now ?? new Date())) {
-    throw new Error(`${pkg} is signed with an npm key that expired on ${key.expires}.`)
+  const { signature, key } = match
+
+  if (key.expires != null) {
+    const expires = new Date(key.expires).getTime()
+    // An unreadable date must not read as "never expires".
+    if (Number.isNaN(expires)) {
+      throw new Error(`${pkg} is signed with an npm key whose expiry date cannot be read (${key.expires}).`)
+    }
+    if (expires < (opts.now ?? new Date()).getTime()) {
+      throw new Error(`${pkg} is signed with an npm key that expired on ${key.expires}.`)
+    }
   }
 
   // Registry signatures cover the package identity and its content hash.

@@ -9,10 +9,14 @@
 // They are updated together, because a rotation that reaches only some of them
 // leaves the rest refusing to install anything.
 //
-// `--update` writes the union of npm's keys and any pinned key npm no longer
-// lists, so packages published before a rotation keep verifying. The shell and
-// PowerShell installers carry only the current key, which is the one npm signs
-// with today; they verify current downloads, not archived ones.
+// The pinned set is exactly what npm advertises. A key npm has withdrawn is not
+// kept for verifying older packages: a signature carries no trusted timestamp,
+// so a signature made before a withdrawal cannot be told apart from one forged
+// after it. These installers only ever fetch current releases, so following
+// npm's set costs nothing and keeps withdrawal meaning withdrawal.
+//
+// The shell and PowerShell installers carry only the current key; the package
+// carries every key npm lists, expiry included, and rejects an expired one.
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -30,12 +34,7 @@ const npmKeys = await fetchNpmKeys()
 const current = npmKeys.find((key) => key.expires == null) ?? npmKeys[0]
 if (!current) throw new Error(`No keys in ${KEYS_URL}`)
 
-const pinned = readPinnedKeys()
-const merged = [...npmKeys]
-for (const key of pinned) {
-  if (!merged.some((m) => m.keyid === key.keyid)) merged.push(key)
-}
-merged.sort((a, b) => a.keyid.localeCompare(b.keyid))
+const merged = [...npmKeys].sort((a, b) => a.keyid.localeCompare(b.keyid))
 
 const changes = [
   { file: JS_KEYS_FILE, next: renderKeysModule(merged) },
@@ -66,20 +65,6 @@ async function fetchNpmKeys () {
   const body = await res.json()
   if (!Array.isArray(body?.keys)) throw new Error(`Unexpected response from ${KEYS_URL}`)
   return body.keys.map((key) => Object.fromEntries(KEY_FIELDS.map((f) => [f, key[f] ?? null])))
-}
-
-function readPinnedKeys () {
-  const source = fs.readFileSync(JS_KEYS_FILE, 'utf8')
-  const start = source.indexOf('[', source.indexOf('NPM_SIGNING_KEYS'))
-  if (start === -1) throw new Error(`Could not find NPM_SIGNING_KEYS in ${JS_KEYS_FILE}`)
-  let depth = 0
-  for (let i = start; i < source.length; i++) {
-    if (source[i] === '[') depth++
-    else if (source[i] === ']' && --depth === 0) {
-      return JSON.parse(source.slice(start, i + 1))
-    }
-  }
-  throw new Error(`Unterminated NPM_SIGNING_KEYS array in ${JS_KEYS_FILE}`)
 }
 
 function renderKeysModule (keys) {
