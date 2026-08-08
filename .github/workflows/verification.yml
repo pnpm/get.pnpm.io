@@ -1,0 +1,29 @@
+name: Verification
+
+on:
+  - push
+  - pull_request
+
+# The install workflows cover the happy path against the real registry. This
+# covers the refusals, which no real registry can produce: a mock serves npm's
+# own metadata with one thing broken at a time, and the installer has to stop.
+jobs:
+  refusals:
+    strategy:
+      matrix:
+        runs-on:
+          # macOS ships LibreSSL as `openssl`, so it exercises a different
+          # verifier than Ubuntu's OpenSSL.
+          - ubuntu-latest
+          - macos-latest
+        script:
+          - install.sh
+          - install.ps1
+      fail-fast: false
+
+    runs-on: ${{ matrix.runs-on }}
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Refuse every broken download
+        run: sh test/verification.sh ${{ matrix.script }}
