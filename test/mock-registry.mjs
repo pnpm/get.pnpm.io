@@ -41,18 +41,28 @@ createServer((req, res) => {
   console.log(`mock registry (${mode}) on ${port}`)
 })
 
+// Resolve a requested path against the registry, refusing anything that would
+// leave it. `//host/x` and `../` both escape plain concatenation.
+function upstreamUrl (path) {
+  const url = new URL(path, UPSTREAM)
+  if (url.origin !== UPSTREAM) {
+    throw new Error(`refusing to proxy off-origin request: ${path}`)
+  }
+  return url
+}
+
 async function handle (req, res) {
   const path = decodeURIComponent(req.url)
 
   if (path.startsWith('/tarball/')) {
-    const upstream = await fetch(`${UPSTREAM}${path.slice('/tarball'.length)}`)
+    const upstream = await fetch(upstreamUrl(path.slice('/tarball'.length)))
     const body = Buffer.from(await upstream.arrayBuffer())
     res.writeHead(200, { 'content-type': 'application/octet-stream' })
     res.end(mode === 'bad-tarball' ? Buffer.concat([body, Buffer.from('tampered')]) : body)
     return
   }
 
-  const upstream = await fetch(`${UPSTREAM}${path}`)
+  const upstream = await fetch(upstreamUrl(path))
   if (!upstream.ok) {
     res.writeHead(upstream.status)
     res.end()
