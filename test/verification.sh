@@ -43,8 +43,10 @@ expect_refusal() {
       sed "s|\$NpmRegistry = 'https://registry.npmjs.org'|\$NpmRegistry = 'http://127.0.0.1:$port'|" \
         "$root/$script" > "$work/patched.ps1"
       set +e
+      # NO_COLOR keeps PowerShell from threading escape sequences through the
+      # error text, which would otherwise land inside the phrases matched below.
       output="$(cd "$home" && HOME="$home" PNPM_HOME="$home/pnpm" PNPM_VERSION="$version" \
-        pwsh -NoProfile "$work/patched.ps1" 2>&1)"
+        NO_COLOR=1 pwsh -NoProfile "$work/patched.ps1" 2>&1)"
       code=$?
       set -e
       ;;
@@ -62,10 +64,14 @@ expect_refusal() {
   kill "$server_pid" 2>/dev/null || true
   wait "$server_pid" 2>/dev/null || true
 
+  # PowerShell wraps its error text to the host width, so a phrase can arrive
+  # split across lines. Match against a single-spaced copy.
+  flattened="$(printf '%s' "$output" | tr -s ' \t\n' ' ')"
+
   if [ "$code" -eq 0 ]; then
     echo "FAIL [$mode] the installer exited 0"
     failures=$((failures + 1))
-  elif ! printf '%s' "$output" | grep -qF "$expected"; then
+  elif ! printf '%s' "$flattened" | grep -qF "$expected"; then
     echo "FAIL [$mode] expected \"$expected\", got:"
     printf '%s\n' "$output" | sed 's/^/      /'
     failures=$((failures + 1))
