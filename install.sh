@@ -108,7 +108,7 @@ verify_integrity() {
 # Download <pkg>@<version> from the npm registry into $2, checking the registry
 # signature and the tarball checksum before anything is extracted.
 fetch_verified_package() {
-  local pkg version dir meta tarball_url integrity signature keyid archive status
+  local pkg version dir meta tarball_url integrity signature keyid archive result
   pkg="$1"
   version="$2"
   dir="$3"
@@ -130,20 +130,20 @@ fetch_verified_package() {
   fi
 
   verify_npm_signature "$pkg@$version:$integrity" "$signature" "$dir"
-  status=$?
-  if [ "$status" -eq 1 ]; then
+  result=$?
+  if [ "$result" -eq 1 ]; then
     abort "The npm registry signature for $pkg@$version is not valid. Refusing to install."
-  elif [ "$status" -eq 2 ]; then
+  elif [ "$result" -eq 2 ]; then
     ohai "openssl was not found — checking the download against its checksum only, not the npm signature"
   fi
 
   archive="$dir/package.tgz"
   download "$tarball_url" > "$archive" || abort "Download Error!"
   verify_integrity "$archive" "$integrity"
-  status=$?
-  if [ "$status" -eq 1 ]; then
+  result=$?
+  if [ "$result" -eq 1 ]; then
     abort "$pkg@$version does not match the checksum the npm registry published for it. Refusing to install."
-  elif [ "$status" -eq 2 ]; then
+  elif [ "$result" -eq 2 ]; then
     abort "No usable SHA-512 tool was found, so the download cannot be verified."
   fi
 
