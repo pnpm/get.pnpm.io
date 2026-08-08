@@ -1,0 +1,193 @@
+import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
+import { extractTarball } from './extractTarball.js'
+import { isMusl, platformPackageName } from './platformPackageName.js'
+import { downloadTarball, fetchPackument, fetchVersionMeta, registryFromEnv } from './registry.js'
+import { resolveVersion } from './resolveVersion.js'
+import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
+
+export { isMusl, platformPackageName, type Target } from './platformPackageName.js'
+export { DEFAULT_REGISTRY, registryFromEnv } from './registry.js'
+export { type Packument, resolveVersion } from './resolveVersion.js'
+export { type PackageSignature, type SigningKey, verifyRegistrySignature } from './verifySignature.js'
+
+/**
+ * The package whose dist-tags name every pnpm release. `@pnpm/exe` carries the
+ * same versions today, but only `pnpm` is published from v12 onward, so its
+ * tags are the ones that cannot go stale.
+ */
+const CLI_PKG_NAME = 'pnpm'
+
+/** Holds the unpacked tarballs while the installation is assembled beside it. */
+const UNPACK_DIR = '.unpack'
+
+/** Where the `dist/` tree that ships beside the executable is published. */
+function wrapperPackageName (major: number): string {
+  return major >= 12 ? CLI_PKG_NAME : '@pnpm/exe'
+}
+
+const USAGE = `Usage: npx get-pnpm [version]
+
+Installs pnpm as a standalone executable and adds it to your PATH.
+
+Arguments:
+  version            An exact version (11.20.0), a major (12), or a dist-tag
+                     (latest, next-12). Defaults to $PNPM_VERSION, then "latest".
+
+Environment variables:
+  PNPM_VERSION           Version to install when no argument is given.
+  PNPM_HOME              Directory to install pnpm into.
+  npm_config_registry    Registry to download pnpm from.
+`
+
+export async function runCli (argv: string[]): Promise<number> {
+  const positional: string[] = []
+  for (const arg of argv) {
+    if (arg === '--help' || arg === '-h') {
+      console.log(USAGE)
+      return 0
+    }
+    if (arg.startsWith('-')) {
+      throw new Error(`Unknown option "${arg}".\n\n${USAGE}`)
+    }
+    positional.push(arg)
+  }
+  if (positional.length > 1) {
+    throw new Error(`Expected at most one version, got ${positional.length}.\n\n${USAGE}`)
+  }
+  return installPnpm({
+    versionSpec: positional[0] ?? process.env.PNPM_VERSION ?? 'latest',
+    registry: registryFromEnv(),
+  })
+}
+
+/**
+ * Downloads the pnpm executable and hands over to `pnpm setup`, which installs
+ * it globally and puts it on the PATH.
+ *
+ * Every download is checked against the checksum the registry published for it,
+ * and that checksum against npm's signature — see `verifyRegistrySignature`.
+ *
+ * The temporary directory is assembled to look like the release tarball that
+ * https://get.pnpm.io/install.sh downloads — the executable next to its `dist/`
+ * tree — because `pnpm setup` installs that directory as-is.
+ *
+ * @returns the exit code of `pnpm setup`.
+ */
+export async function installPnpm (
+  opts: {
+    versionSpec: string
+    registry: string
+    keys?: readonly SigningKey[]
+  }
+): Promise<number> {
+  const packument = await fetchPackument(opts.registry, CLI_PKG_NAME)
+  const version = resolveVersion(packument, opts.versionSpec)
+  const major = majorVersion(version)
+  const platformPkgName = platformPackageName({
+    major,
+    platform: process.platform,
+    arch: process.arch,
+    musl: isMusl(),
+  })
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pnpm-install-'))
+  const removeTmpDir = (): void => {
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  }
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+    process.once(signal, () => {
+      removeTmpDir()
+      process.exit(1)
+    })
+  }
+  try {
+    console.log(`==> Downloading pnpm ${version}`)
+    const executable = process.platform === 'win32' ? 'pnpm.exe' : 'pnpm'
+    const fetchPackage = verifiedPackageFetcher({ dir: tmpDir, registry: opts.registry, version, keys: opts.keys })
+
+    const [platformPkg, wrapperPkg] = await Promise.all([
+      fetchPackage(platformPkgName),
+      // v11 was the first release to keep files next to the executable; up to
+      // v10 the executable is self-contained and ships no `dist/`.
+      major >= 11 ? fetchPackage(wrapperPackageName(major)) : undefined,
+    ])
+
+    const binPath = path.join(tmpDir, executable)
+    fs.renameSync(path.join(platformPkg.dir, executable), binPath)
+    fs.chmodSync(binPath, 0o755)
+    if (wrapperPkg != null) {
+      fs.renameSync(path.join(wrapperPkg.dir, 'dist'), path.join(tmpDir, 'dist'))
+      writeManifest({ tmpDir, executable, version, wrapperDir: wrapperPkg.dir, major })
+    }
+    // `setup` installs this directory as a package, so nothing may be left in
+    // it that does not belong in the installation.
+    fs.rmSync(path.join(tmpDir, UNPACK_DIR), { recursive: true, force: true })
+
+    const { error, status } = spawnSync(binPath, ['setup', '--force'], { stdio: 'inherit' })
+    if (error != null) throw error
+    return status ?? 1
+  } finally {
+    removeTmpDir()
+  }
+}
+
+/**
+ * `pnpm setup` installs the directory as a package, writing a minimal manifest
+ * when there is none — which is what the release tarball relies on. That
+ * tarball bundles the runtime dependencies inside `dist/`; the registry copy
+ * declares them instead, so up to v11 they have to be declared here or the
+ * install silently loses them (`@reflink/reflink`, and with it copy-on-write
+ * cloning). From v12 the `dist/` tree is self-contained again, so the manifest
+ * `setup` writes is left to it.
+ */
+function writeManifest (
+  opts: { tmpDir: string, executable: string, version: string, wrapperDir: string, major: number }
+): void {
+  if (opts.major >= 12) return
+  const wrapper = JSON.parse(fs.readFileSync(path.join(opts.wrapperDir, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> }
+  if (wrapper.dependencies == null) return
+  fs.writeFileSync(path.join(opts.tmpDir, 'package.json'), JSON.stringify({
+    name: '@pnpm/exe',
+    version: opts.version,
+    type: 'module',
+    bin: { pnpm: opts.executable, pn: opts.executable },
+    dependencies: wrapper.dependencies,
+  }))
+}
+
+/** Downloads packages of one version into one directory, verifying each. */
+function verifiedPackageFetcher (
+  opts: { dir: string, registry: string, version: string, keys?: readonly SigningKey[] }
+): (pkgName: string) => Promise<{ dir: string }> {
+  return async function fetchPackage (pkgName: string): Promise<{ dir: string }> {
+    const meta = await fetchVersionMeta(opts.registry, pkgName, opts.version)
+    verifyRegistrySignature({
+      name: pkgName,
+      version: opts.version,
+      integrity: meta.dist.integrity ?? '',
+      signatures: meta.dist.signatures,
+      keys: opts.keys,
+    })
+    // Unpack away from the directory being assembled: `pnpm` is both a package
+    // name and the name of the executable that ends up beside it.
+    const unpackDir = path.join(opts.dir, UNPACK_DIR, pkgName.replaceAll('/', '-'))
+    const tarball = `${unpackDir}.tgz`
+    fs.mkdirSync(path.dirname(tarball), { recursive: true })
+    await downloadTarball(meta, tarball)
+    extractTarball(tarball, unpackDir)
+    fs.rmSync(tarball)
+    return { dir: path.join(unpackDir, 'package') }
+  }
+}
+
+function majorVersion (version: string): number {
+  const major = Number(version.split('.')[0])
+  if (!Number.isInteger(major)) {
+    throw new Error(`Could not read a major version from "${version}".`)
+  }
+  return major
+}

@@ -1,0 +1,43 @@
+{
+  "name": "get-pnpm",
+  "version": "1.0.0",
+  "description": "Installs pnpm as a standalone executable",
+  "keywords": [
+    "pnpm",
+    "install",
+    "installer"
+  ],
+  "license": "MIT",
+  "funding": "https://opencollective.com/pnpm",
+  "repository": "https://github.com/pnpm/get.pnpm.io/tree/main/npm",
+  "homepage": "https://github.com/pnpm/get.pnpm.io/tree/main/npm#readme",
+  "bugs": {
+    "url": "https://github.com/pnpm/get.pnpm.io/issues"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "files": [
+    "lib",
+    "!*.map",
+    "bin"
+  ],
+  "bin": {
+    "get-pnpm": "bin/get-pnpm.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node --test test/*.test.ts",
+    "prepublishOnly": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

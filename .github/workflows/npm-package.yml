@@ -1,0 +1,44 @@
+name: get-pnpm package
+
+on:
+  - push
+  - pull_request
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        runtime:
+          # The oldest supported runtime and the current one. `engines` allows
+          # Node 22, so it has to be exercised there.
+          - node@22
+          - node@24
+
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: npm
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # pnpm's own action, installing pnpm and the runtime in one step. Nothing
+      # to install at the repository root, so its `pnpm install` is left off.
+      - uses: pnpm/setup@v2
+        with:
+          version: latest
+          runtime: ${{ matrix.runtime }}
+          install: false
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test

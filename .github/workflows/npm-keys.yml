@@ -1,0 +1,49 @@
+name: npm signing keys
+
+on:
+  schedule:
+    # Weekly. A rotation npm has not announced would otherwise surface as a
+    # failed install for whoever runs the installer next.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The script only needs a runtime; pnpm comes along with it.
+      - uses: pnpm/setup@v2
+        with:
+          version: latest
+          runtime: node@24
+          install: false
+
+      - id: refresh
+        run: |
+          if node scripts/update-npm-keys.mjs; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            node scripts/update-npm-keys.mjs --update
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.refresh.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="npm-key-rotation-$(date +%Y%m%d)"
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git checkout -b "$branch"
+          git commit -am 'chore: refresh the pinned npm signing keys'
+          git push -u origin "$branch"
+          gh pr create --title 'chore: refresh the pinned npm signing keys' --body \
+            'npm rotated its registry signing key. Every installer pins it, so all three files change together.
+
+          The checksums in `SHASUMS256.txt` cover `install.sh` and `install.ps1`, so this needs a re-sign (`./_update.sh`) before merge.'
