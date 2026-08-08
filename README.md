@@ -39,34 +39,48 @@ curl -fsSLO https://get.pnpm.io/SHASUMS256.txt.sig
 # Import the pnpm release key (compare the fingerprint with the one below)
 curl -fsSL https://keys.openpgp.org/vks/v1/by-fingerprint/4D20AD76D7BE567214F3F8EE4EABAE7510A044FA | gpg --import
 
-gpg --verify SHASUMS256.txt.sig SHASUMS256.txt
-grep ' install.sh$' SHASUMS256.txt | sha256sum -c -   # on macOS: shasum -a 256 -c -
-
-sh install.sh
+gpg --verify SHASUMS256.txt.sig SHASUMS256.txt \
+  && grep ' install.sh$' SHASUMS256.txt | sha256sum -c - \
+  && sh install.sh
 ```
 
-The first check prints `Good signature`, followed by the key's user IDs; the second prints
-`install.sh: OK`. Run the installer only if both pass.
+The steps are chained, so the installer does not run unless both checks pass. The first
+prints `Good signature`, followed by the key's user IDs; the second prints `install.sh: OK`.
+
+macOS has no `sha256sum` — use `shasum -a 256 -c -` in its place.
 
 `gpg` also prints `WARNING: The key's User ID is not certified with a trusted signature`.
 That is expected — it only means you have not personally certified the key. What
 establishes trust is the fingerprint, so compare the one `gpg` reports against the
 fingerprint published here.
 
-On Windows (PowerShell):
+On Windows (PowerShell). `gpg` is not part of Windows — [Gpg4win](https://gpg4win.org)
+provides it:
 
 ```powershell
 iwr https://get.pnpm.io/install.ps1 -OutFile install.ps1
 iwr https://get.pnpm.io/SHASUMS256.txt -OutFile SHASUMS256.txt
+iwr https://get.pnpm.io/SHASUMS256.txt.sig -OutFile SHASUMS256.txt.sig
+
+# Import the pnpm release key (compare the fingerprint with the one below)
+iwr https://keys.openpgp.org/vks/v1/by-fingerprint/4D20AD76D7BE567214F3F8EE4EABAE7510A044FA -OutFile pnpm.asc
+gpg --import pnpm.asc
+
+gpg --verify SHASUMS256.txt.sig SHASUMS256.txt
+if ($LASTEXITCODE -ne 0) { throw 'SHASUMS256.txt is not signed by the pnpm release key' }
 
 $expected = (Select-String -Path SHASUMS256.txt -Pattern ' install\.ps1$').Line.Split(' ')[0]
-(Get-FileHash install.ps1 -Algorithm SHA256).Hash -eq $expected.ToUpper()
+if ((Get-FileHash install.ps1 -Algorithm SHA256).Hash -ne $expected.ToUpper()) {
+  throw 'install.ps1 does not match its published checksum'
+}
 
 .\install.ps1
 ```
 
-The comparison prints `True` if the script matches. To also check the signature, install
-[Gpg4win](https://gpg4win.org) and run the same `gpg --verify` command as above.
+Both checks stop the script rather than fall through to the installer. Skipping the
+signature step is not equivalent to running it: the checksums are served from the same
+site as the installer, so on their own they only prove the two files agree with each
+other. The signature is what ties them to the pnpm release key.
 
 ### The pnpm release key
 
@@ -83,8 +97,9 @@ source works:
 curl -fsSL https://keybase.io/pnpm/pgp_keys.asc | gpg --import
 ```
 
-`SHASUMS256.txt` covers the installer scripts served from this site. The pnpm executable
-itself is downloaded by the installer from the pnpm release for the version being installed.
+`SHASUMS256.txt` lists the installer scripts served from this site — `install.sh`,
+`install.ps1`, and the legacy `v6*.js` installers. It does not cover the pnpm executable,
+which the installer downloads from the pnpm release for the version being installed.
 
 ## Configuring
 
