@@ -31,6 +31,131 @@ download() {
   fi
 }
 
+NPM_REGISTRY='https://registry.npmjs.org'
+
+# npm's registry signing key, mirrored from
+# https://registry.npmjs.org/-/npm/v1/keys.
+#
+# Pinning it here is what makes the check below worth running. The registry
+# publishes both the tarball and the checksum, so a checksum fetched from it
+# proves nothing on its own; the signature does, because the key that produced
+# it is not one the download host can mint. Rotations are rare — when npm
+# rotates, this value has to be updated here.
+NPM_SIGNING_KEY_ID='SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U'
+NPM_SIGNING_KEY='MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEY6Ya7W++7aUPzvMTrezH6Ycx3c+HOKYCcNGybJZSCJq/fd7Qa8uuAKtdIkUQtQiEKERhAmE5lMMJhP8OkDOa2g=='
+
+# The "dist-tags" object of a packument, one `tag:version` per line.
+dist_tags() {
+  printf '%s' "$1" | tr -d ' \n' | sed 's/.*"dist-tags":{//; s/}.*//' | tr ',' '\n' | tr -d '"'
+}
+
+# The version a dist-tag points at, empty when there is no such tag.
+dist_tag_version() {
+  dist_tags "$1" | grep "^$2:" | head -n 1 | sed "s/^$2://"
+}
+
+# First "<name>":"<value>" pair in a JSON document. The fields read out of the
+# registry metadata below (tarball, integrity, sig, keyid) each occur once.
+json_string() {
+  printf '%s' "$1" | tr -d ' \n' | grep -o "\"$2\":\"[^\"]*\"" | head -n 1 | sed "s/\"$2\":\"//; s/\"\$//"
+}
+
+# Verify an npm registry signature over "<name>@<version>:<integrity>".
+# Returns 2 when openssl is missing, so the caller can tell "cannot check" from
+# "checked and wrong".
+verify_npm_signature() {
+  local message signature dir
+  message="$1"
+  signature="$2"
+  dir="$3"
+  command -v openssl > /dev/null 2>&1 || return 2
+  # RFC 7468 wants the base64 body wrapped at 64 columns. OpenSSL tolerates one
+  # long line; not every parser does, and a rejected key would be reported here
+  # as a bad signature.
+  {
+    printf -- '-----BEGIN PUBLIC KEY-----\n'
+    printf '%s\n' "$NPM_SIGNING_KEY" | fold -w 64
+    printf -- '-----END PUBLIC KEY-----\n'
+  } > "$dir/npm-key.pem"
+  printf '%s' "$signature" | openssl base64 -d -A > "$dir/npm-sig.bin" 2>/dev/null || return 1
+  printf '%s' "$message" > "$dir/npm-msg"
+  openssl dgst -sha256 -verify "$dir/npm-key.pem" -signature "$dir/npm-sig.bin" "$dir/npm-msg" > /dev/null 2>&1
+}
+
+# Compare a file against a "sha512-<base64>" integrity string. Returns 2 when
+# no usable digest tool is present.
+verify_integrity() {
+  local file expected actual
+  file="$1"
+  expected="${2#sha512-}"
+  [ "$expected" != "$2" ] || return 2
+  if command -v openssl > /dev/null 2>&1; then
+    actual="$(openssl dgst -sha512 -binary "$file" | openssl base64 -A)"
+  else
+    # No openssl: compare in hex instead, which busybox and coreutils can do.
+    expected="$(printf '%s' "$expected" | base64 -d 2>/dev/null | od -An -v -tx1 | tr -d ' \n')"
+    if command -v sha512sum > /dev/null 2>&1; then
+      actual="$(sha512sum "$file" | cut -d' ' -f1)"
+    elif command -v shasum > /dev/null 2>&1; then
+      actual="$(shasum -a 512 "$file" | cut -d' ' -f1)"
+    else
+      return 2
+    fi
+  fi
+  [ -n "$expected" ] && [ "$actual" = "$expected" ]
+}
+
+# Download <pkg>@<version> from the npm registry into $2, checking the registry
+# signature and the tarball checksum before anything is extracted.
+fetch_verified_package() {
+  local pkg version dir meta tarball_url integrity signature keyid archive result
+  pkg="$1"
+  version="$2"
+  dir="$3"
+  meta="$(download "$NPM_REGISTRY/$pkg/$version")" || abort "Could not reach the npm registry for $pkg@$version."
+  tarball_url="$(json_string "$meta" tarball)"
+  integrity="$(json_string "$meta" integrity)"
+  signature="$(json_string "$meta" sig)"
+  keyid="$(json_string "$meta" keyid)"
+  [ -n "$tarball_url" ] || abort "The npm registry published no tarball for $pkg@$version."
+  [ -n "$integrity" ] || abort "The npm registry published no checksum for $pkg@$version."
+
+  if [ -z "$signature" ]; then
+    abort "$pkg@$version carries no npm registry signature, so it cannot be verified."
+  elif [ "$keyid" != "$NPM_SIGNING_KEY_ID" ]; then
+    abort "$pkg@$version is signed with an unexpected npm key ($keyid)." \
+      "" \
+      "If npm has rotated its signing key, this installer needs updating." \
+      "Until then, install pnpm another way: https://pnpm.io/installation"
+  fi
+
+  verify_npm_signature "$pkg@$version:$integrity" "$signature" "$dir"
+  result=$?
+  if [ "$result" -eq 1 ]; then
+    abort "The npm registry signature for $pkg@$version is not valid. Refusing to install."
+  elif [ "$result" -eq 2 ]; then
+    ohai "openssl was not found — checking the download against its checksum only, not the npm signature"
+  fi
+
+  archive="$dir/package.tgz"
+  download "$tarball_url" > "$archive" || abort "Download Error!"
+  verify_integrity "$archive" "$integrity"
+  result=$?
+  if [ "$result" -eq 1 ]; then
+    abort "$pkg@$version does not match the checksum the npm registry published for it. Refusing to install."
+  elif [ "$result" -eq 2 ]; then
+    abort "No usable SHA-512 tool was found, so the download cannot be verified."
+  fi
+
+  # Extract whole, then lift the wanted entry out of the package/ root: no
+  # reliance on --strip-components or member selection, which busybox tar and
+  # bsdtar disagree about.
+  rm -rf "$dir/unpacked"
+  mkdir -p "$dir/unpacked"
+  tar -xzf "$archive" -C "$dir/unpacked" || abort "Could not unpack $pkg@$version."
+  rm -f "$archive"
+}
+
 is_glibc_compatible() {
   getconf GNU_LIBC_VERSION >/dev/null 2>&1 || ldd --version >/dev/null 2>&1 || return 1
 }
@@ -136,16 +261,35 @@ detect_arch() {
 }
 
 download_and_install() {
-  local platform arch libc_suffix version_json version tmp_dir major_version asset_base
+  local platform arch libc_suffix preferred_version version_json version tmp_dir major_version asset_base
   platform="$(detect_platform)"
   arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
   libc_suffix="$(detect_libc_suffix)"
-  if [ -z "${PNPM_VERSION}" ]; then
-    version_json="$(download "https://registry.npmjs.org/@pnpm/exe")" || abort "Download Error!"
-    version="$(echo "$version_json" | grep -o '"latest":[[:space:]]*"[0-9.]*"' | grep -o '[0-9.]*')"
-  else
-    version="${PNPM_VERSION}"
-  fi
+  # PNPM_VERSION takes a dist-tag or a version, as it does in install.ps1. A
+  # version is used as given; anything else is looked up in the dist-tags.
+  preferred_version="${PNPM_VERSION:-latest}"
+  case "$preferred_version" in
+    [0-9]*) version="$preferred_version" ;;
+    v[0-9]*) version="${preferred_version#v}" ;;
+    *)
+      # Tags come from `pnpm`: it is published for every release, whereas
+      # `@pnpm/exe` is on its way out and would go stale.
+      version_json="$(download "$NPM_REGISTRY/pnpm")" || abort "Download Error!"
+      version="$(dist_tag_version "$version_json" "$preferred_version")"
+      [ -n "$version" ] || abort \
+        "Sorry! pnpm \"$preferred_version\" could not be found." \
+        "" \
+        "PNPM_VERSION takes a version or one of these tags:" \
+        "$(dist_tags "$version_json")"
+      ;;
+  esac
+
+  # Everything below builds URLs out of this value, so keep it to the shape of
+  # a version. Without this `PNPM_VERSION=12.0.0/../../@evil/pkg` passes the
+  # major-version test and changes which path is requested.
+  case "$version" in
+    '' | *[!0-9A-Za-z.+-]*) abort "Invalid pnpm version: $version" ;;
+  esac
 
   # Compute the major version once. Strip an optional leading "v" so
   # PNPM_VERSION=v11.0.0 normalizes the same as 11.0.0; the second sed
@@ -155,7 +299,11 @@ download_and_install() {
   # `2>/dev/null` suppression hid the parse error), and skip every
   # major-gated branch below.
   major_version="$(printf '%s' "$version" | sed -E 's/^v//; s/^([0-9]+).*/\1/')"
-  [ -n "$major_version" ] || abort "Invalid PNPM_VERSION: $version"
+  # Caught here so the major-gated tests below don't fail with a shell error
+  # about integers if the resolved value is not a version after all.
+  case "$major_version" in
+    '' | *[!0-9]*) abort "Invalid pnpm version: $version" ;;
+  esac
 
   # Intel macOS isn't supported on pnpm v11 only: the SEA binary produced
   # by Node.js for darwin-x64 segfaults at startup because of an upstream
@@ -183,6 +331,33 @@ download_and_install() {
   # This ensures the directory path is captured even if tmp_dir goes out of scope.
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp_dir'" EXIT INT TERM HUP
+
+  if [ "$major_version" -ge 12 ]; then
+    # v12+ is published to the npm registry as well as to the GitHub release
+    # page, and the two carry the same executable byte for byte. Only the
+    # registry copy comes with a signature over its checksum, so that is the
+    # one worth downloading: see NPM_SIGNING_KEY above.
+    local executable platform_pkg
+    executable='pnpm'
+    if [ "${platform}" = 'win32' ]; then
+      executable='pnpm.exe'
+    fi
+
+    ohai "Downloading pnpm ${version}"
+    platform_pkg="@pnpm/exe.${platform}-${arch}${libc_suffix}"
+    fetch_verified_package "$platform_pkg" "$version" "$tmp_dir"
+    mv "$tmp_dir/unpacked/package/$executable" "$tmp_dir/$executable" || return 1
+
+    # The executable expects the `dist/` tree next to it. `pnpm` is where the
+    # registry publishes it, verified the same way. (`@pnpm/exe` currently
+    # carries identical content, but only `pnpm` is published going forward.)
+    fetch_verified_package 'pnpm' "$version" "$tmp_dir"
+    mv "$tmp_dir/unpacked/package/dist" "$tmp_dir/dist" || return 1
+
+    chmod +x "$tmp_dir/$executable"
+    SHELL="$SHELL" "$tmp_dir/$executable" setup --force || return 1
+    return 0
+  fi
 
   ohai "Downloading pnpm binaries ${version}"
   asset_base="$(asset_basename "$version" "$platform" "$arch" "$libc_suffix")"

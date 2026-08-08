@@ -19,6 +19,7 @@ jobs:
         pnpm_version:
           - '10.30.1'  # v10: single-binary download
           - 'next-11'  # v11: tarball download
+          - 'next-12'  # v12: verified npm registry download
         script:
           - install.sh
       fail-fast: false
@@ -28,22 +29,28 @@ jobs:
       - name: Install shell
         run: sudo apt-get install -y ${{ matrix.shell }}
         if: ${{ matrix.shell != 'sh' }}
-      - name: Resolve pnpm version
-        run: |
-          tag="${{ matrix.pnpm_version }}"
-          if echo "$tag" | grep -qE '^[0-9]'; then
-            echo "PNPM_VERSION=$tag" >> "$GITHUB_ENV"
-          else
-            json=$(curl -fsSL "https://registry.npmjs.org/@pnpm/exe")
-            version=$(echo "$json" | grep -o "\"$tag\":[[:space:]]*\"[^\"]*\"" | grep -o '"[0-9][^"]*"' | tr -d '"')
-            echo "PNPM_VERSION=$version" >> "$GITHUB_ENV"
-          fi
       - name: Run installation script
         env:
           PNPM_HOME: /tmp/pnpm-home
+          PNPM_VERSION: ${{ matrix.pnpm_version }}
         run: ENV="~/.${{ matrix.shell }}rc" SHELL="$(which ${{ matrix.shell }})" ${{ matrix.shell }} ${{ matrix.script }}
       - name: Verify pnpm works
+        env:
+          PNPM_VERSION: ${{ matrix.pnpm_version }}
         run: |
+          # Prove the cell installed the major it selects. Without this a
+          # mis-wired PNPM_VERSION falls back to `latest`, and a cell that
+          # exists to exercise one code path passes while testing another.
+          case "$PNPM_VERSION" in
+            [0-9]*) expected_major="${PNPM_VERSION%%.*}" ;;
+            *) expected_major="${PNPM_VERSION##*-}" ;;
+          esac
+          export PATH="/tmp/pnpm-home/bin:/tmp/pnpm-home:$PATH"
+          installed="$(PNPM_HOME=/tmp/pnpm-home pnpm --version)"
+          if [ "${installed%%.*}" != "$expected_major" ]; then
+            echo "expected pnpm $expected_major.x, got $installed" >&2
+            exit 1
+          fi
           tmpdir=$(mktemp -d)
           cd "$tmpdir"
           echo '{}' > package.json

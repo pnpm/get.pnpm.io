@@ -98,8 +98,33 @@ curl -fsSL https://keybase.io/pnpm/pgp_keys.asc | gpg --import
 ```
 
 `SHASUMS256.txt` lists the installer scripts served from this site — `install.sh`,
-`install.ps1`, and the legacy `v6*.js` installers. It does not cover the pnpm executable,
-which the installer downloads from the pnpm release for the version being installed.
+`install.ps1`, and the legacy `v6*.js` installers. What the installer downloads afterwards
+is covered separately, below.
+
+### How the downloaded executable is verified
+
+pnpm 12 and newer are downloaded from the npm registry, which publishes a signature over
+each package's checksum. The installer pins npm's public key, checks that signature, and
+then checks the downloaded file against the signed checksum. Neither a tampered download
+nor a tampered checksum passes, because the key that signs them is not one the download
+host can mint. The executable is identical to the one on the GitHub release page.
+
+Signature checking needs `openssl` (POSIX) or PowerShell 7 (Windows). Without them the
+installer says so and checks the download against the registry's checksum only — which,
+coming from the same host as the download, catches corruption rather than tampering.
+
+pnpm 11 and older are downloaded from the GitHub release page, which publishes no
+signature, so those downloads are not verified. To check one yourself, GitHub attests
+every release asset — name the file you downloaded, which for pnpm 11 and older follows
+the older scheme (`pnpm-macos-*`, `pnpm-win-*`, `pnpm-linuxstatic-*`):
+
+```sh
+gh attestation verify pnpm-linux-x64.tar.gz --repo pnpm/pnpm    # v11+
+gh attestation verify pnpm-macos-arm64 --repo pnpm/pnpm         # v10 and older
+```
+
+That confirms the file was built by pnpm's release workflow from the signed release tag,
+and the attestation is recorded in a public transparency log.
 
 ## Configuring
 
@@ -117,4 +142,4 @@ All the supported environment variables that can influence pnpm's installation:
 
 | Env variable      | Type                  | Description                                                                              | Example                                           |
 | ----------------- | --------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| **PNPM_VERSION**  | _version | `latest` by default. The pnpm version to be installed.<br>(not older than `pnpm@6.27.2`) | `PNPM_VERSION=6.31.0`                               |
+| **PNPM_VERSION**  | _version or dist-tag_ | `latest` by default. The pnpm version to be installed, as a version or a dist-tag.<br>(not older than `pnpm@6.27.2`) | `PNPM_VERSION=6.31.0`<br>`PNPM_VERSION=next-12` |
