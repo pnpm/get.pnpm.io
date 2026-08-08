@@ -256,7 +256,9 @@ function Get-VerifiedPackage {
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$pkgInfo = Invoke-WebRequest "https://registry.npmjs.org/@pnpm/exe" -UseBasicParsing
+# Tags come from `pnpm`: it is published for every release, whereas
+# `@pnpm/exe` is on its way out and would go stale.
+$pkgInfo = Invoke-WebRequest "$NpmRegistry/pnpm" -UseBasicParsing
 $versionJson = $pkgInfo.Content | ConvertFrom-Json
 $versions = Get-Member -InputObject $versionJson.versions -Type NoteProperty | Select-Object -ExpandProperty Name
 $distTags = Get-Member -InputObject $versionJson.'dist-tags' -Type NoteProperty | Select-Object -ExpandProperty Name
@@ -302,9 +304,10 @@ if ($majorVersion -ge 12) {
   $tempFile = Join-Path $tempFileFolder.FullName $executable
   Move-Item (Join-Path $unpacked $executable) $tempFile
 
-  # The executable expects the `dist/` tree next to it; `@pnpm/exe` is where
-  # the registry publishes it, verified the same way.
-  $unpacked = Get-VerifiedPackage -Package '@pnpm/exe' -Version $version -Destination $tempFileFolder.FullName
+  # The executable expects the `dist/` tree next to it. `pnpm` is where the
+  # registry publishes it, verified the same way. (`@pnpm/exe` currently
+  # carries identical content, but only `pnpm` is published going forward.)
+  $unpacked = Get-VerifiedPackage -Package 'pnpm' -Version $version -Destination $tempFileFolder.FullName
   Move-Item (Join-Path $unpacked 'dist') (Join-Path $tempFileFolder.FullName 'dist')
 } elseif ($majorVersion -ge 11) {
   # v11: distributed as tarballs containing the binary and dist/ directory

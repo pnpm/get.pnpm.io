@@ -272,7 +272,9 @@ download_and_install() {
     [0-9]*) version="$preferred_version" ;;
     v[0-9]*) version="${preferred_version#v}" ;;
     *)
-      version_json="$(download "$NPM_REGISTRY/@pnpm/exe")" || abort "Download Error!"
+      # Tags come from `pnpm`: it is published for every release, whereas
+      # `@pnpm/exe` is on its way out and would go stale.
+      version_json="$(download "$NPM_REGISTRY/pnpm")" || abort "Download Error!"
       version="$(dist_tag_version "$version_json" "$preferred_version")"
       [ -n "$version" ] || abort \
         "Sorry! pnpm \"$preferred_version\" could not be found." \
@@ -346,9 +348,10 @@ download_and_install() {
     fetch_verified_package "$platform_pkg" "$version" "$tmp_dir"
     mv "$tmp_dir/unpacked/package/$executable" "$tmp_dir/$executable" || return 1
 
-    # The executable expects the `dist/` tree next to it; `@pnpm/exe` is where
-    # the registry publishes it, and it is verified the same way.
-    fetch_verified_package '@pnpm/exe' "$version" "$tmp_dir"
+    # The executable expects the `dist/` tree next to it. `pnpm` is where the
+    # registry publishes it, verified the same way. (`@pnpm/exe` currently
+    # carries identical content, but only `pnpm` is published going forward.)
+    fetch_verified_package 'pnpm' "$version" "$tmp_dir"
     mv "$tmp_dir/unpacked/package/dist" "$tmp_dir/dist" || return 1
 
     chmod +x "$tmp_dir/$executable"
