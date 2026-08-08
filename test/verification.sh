@@ -25,7 +25,7 @@ expect_refusal() {
   expected="$2"
   port="$3"
 
-  node "$here/mock-registry.mjs" "$mode" "$port" > "$work/server.log" 2>&1 &
+  node "$here/mock-registry.mjs" "$mode" "$port" "$version" > "$work/server.log" 2>&1 &
   server_pid=$!
   # Wait for the port rather than sleeping a guessed amount.
   i=0
