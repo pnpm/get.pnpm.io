@@ -13,9 +13,8 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"; kill "${server_pid:-}" 2>/dev/null || true' EXIT INT TERM
 
 # A concrete version, so the run does not depend on the mock serving packuments.
-version="$(curl -fsSL https://registry.npmjs.org/pnpm | tr -d ' \n' \
-  | sed 's/.*"dist-tags":{//; s/}.*//' | tr ',' '\n' | tr -d '"' \
-  | grep '^next-12:' | head -n 1 | sed 's/^next-12://')"
+version="$(curl -fsSL https://registry.npmjs.org/pnpm \
+  | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(JSON.parse(s)["dist-tags"]["next-12"]??""))')"
 [ -n "$version" ] || { echo "could not resolve next-12"; exit 1; }
 echo "testing $script against pnpm $version"
 
