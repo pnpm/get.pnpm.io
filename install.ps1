@@ -227,7 +227,7 @@ function Get-VerifiedPackage {
   if ($valid -eq $false) {
     throw "The npm registry signature for $Package@$Version is not valid. Refusing to install."
   } elseif ($null -eq $valid) {
-    Write-Host "PowerShell 7 is needed to check the npm signature — verifying the checksum only.`n" -ForegroundColor Yellow
+    Write-Host "PowerShell 7 is needed to check the npm signature - verifying the checksum only.`n" -ForegroundColor Yellow
   }
 
   $archive = Join-Path $Destination 'package.tgz'
