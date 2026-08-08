@@ -59,8 +59,14 @@ async function handle (req, res) {
     return
   }
   const meta = await upstream.json()
+  res.writeHead(200, { 'content-type': 'application/json' })
+  // Packuments have no `dist` and nothing to break: install.ps1 asks for one to
+  // resolve dist-tags before it fetches any version.
+  if (meta.dist == null) {
+    res.end(JSON.stringify(meta))
+    return
+  }
   // Point the tarball at this server so its bytes can be mutated too.
   meta.dist.tarball = `http://127.0.0.1:${port}/tarball${new URL(meta.dist.tarball).pathname}`
-  res.writeHead(200, { 'content-type': 'application/json' })
   res.end(JSON.stringify(MUTATIONS[mode](meta)))
 }
