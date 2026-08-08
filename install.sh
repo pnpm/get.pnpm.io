@@ -44,6 +44,16 @@ NPM_REGISTRY='https://registry.npmjs.org'
 NPM_SIGNING_KEY_ID='SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U'
 NPM_SIGNING_KEY='MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEY6Ya7W++7aUPzvMTrezH6Ycx3c+HOKYCcNGybJZSCJq/fd7Qa8uuAKtdIkUQtQiEKERhAmE5lMMJhP8OkDOa2g=='
 
+# The "dist-tags" object of a packument, one `tag:version` per line.
+dist_tags() {
+  printf '%s' "$1" | tr -d ' \n' | sed 's/.*"dist-tags":{//; s/}.*//' | tr ',' '\n' | tr -d '"'
+}
+
+# The version a dist-tag points at, empty when there is no such tag.
+dist_tag_version() {
+  dist_tags "$1" | grep "^$2:" | head -n 1 | sed "s/^$2://"
+}
+
 # First "<name>":"<value>" pair in a JSON document. The fields read out of the
 # registry metadata below (tarball, integrity, sig, keyid) each occur once.
 json_string() {
@@ -244,16 +254,26 @@ detect_arch() {
 }
 
 download_and_install() {
-  local platform arch libc_suffix version_json version tmp_dir major_version asset_base
+  local platform arch libc_suffix preferred_version version_json version tmp_dir major_version asset_base
   platform="$(detect_platform)"
   arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
   libc_suffix="$(detect_libc_suffix)"
-  if [ -z "${PNPM_VERSION}" ]; then
-    version_json="$(download "https://registry.npmjs.org/@pnpm/exe")" || abort "Download Error!"
-    version="$(echo "$version_json" | grep -o '"latest":[[:space:]]*"[0-9.]*"' | grep -o '[0-9.]*')"
-  else
-    version="${PNPM_VERSION}"
-  fi
+  # PNPM_VERSION takes a dist-tag or a version, as it does in install.ps1. A
+  # version is used as given; anything else is looked up in the dist-tags.
+  preferred_version="${PNPM_VERSION:-latest}"
+  case "$preferred_version" in
+    [0-9]*) version="$preferred_version" ;;
+    v[0-9]*) version="${preferred_version#v}" ;;
+    *)
+      version_json="$(download "$NPM_REGISTRY/@pnpm/exe")" || abort "Download Error!"
+      version="$(dist_tag_version "$version_json" "$preferred_version")"
+      [ -n "$version" ] || abort \
+        "Sorry! pnpm \"$preferred_version\" could not be found." \
+        "" \
+        "PNPM_VERSION takes a version or one of these tags:" \
+        "$(dist_tags "$version_json")"
+      ;;
+  esac
 
   # Compute the major version once. Strip an optional leading "v" so
   # PNPM_VERSION=v11.0.0 normalizes the same as 11.0.0; the second sed
@@ -263,15 +283,10 @@ download_and_install() {
   # `2>/dev/null` suppression hid the parse error), and skip every
   # major-gated branch below.
   major_version="$(printf '%s' "$version" | sed -E 's/^v//; s/^([0-9]+).*/\1/')"
-  # A non-numeric result means the value is not a version at all — a dist-tag
-  # such as `next-12`, which this script does not resolve. Caught here so the
-  # major-gated tests below don't fail with a shell error about integers.
+  # Caught here so the major-gated tests below don't fail with a shell error
+  # about integers if the resolved value is not a version after all.
   case "$major_version" in
-    '' | *[!0-9]*)
-      abort "Invalid PNPM_VERSION: $version" \
-        "" \
-        "PNPM_VERSION takes a version number, not a dist-tag."
-      ;;
+    '' | *[!0-9]*) abort "Invalid pnpm version: $version" ;;
   esac
 
   # Intel macOS isn't supported on pnpm v11 only: the SEA binary produced

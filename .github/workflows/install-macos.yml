@@ -29,19 +29,10 @@ jobs:
       - name: Install shell
         run: brew install ${{ matrix.shell }}
         if: ${{ matrix.shell == 'ksh' || matrix.shell == 'dash' }}
-      - name: Resolve pnpm version
-        run: |
-          tag="${{ matrix.pnpm_version }}"
-          if echo "$tag" | grep -qE '^[0-9]'; then
-            echo "PNPM_VERSION=$tag" >> "$GITHUB_ENV"
-          else
-            json=$(curl -fsSL "https://registry.npmjs.org/@pnpm/exe")
-            version=$(echo "$json" | grep -o "\"$tag\":[[:space:]]*\"[^\"]*\"" | grep -o '"[0-9][^"]*"' | tr -d '"')
-            echo "PNPM_VERSION=$version" >> "$GITHUB_ENV"
-          fi
       - name: Run installation script
         env:
           PNPM_HOME: /tmp/pnpm-home
+          PNPM_VERSION: ${{ matrix.pnpm_version }}
         run: ENV="~/.${{ matrix.shell }}rc" SHELL="$(which ${{ matrix.shell }})" ${{ matrix.shell }} ${{ matrix.script }}
       - name: Verify pnpm works
         run: |
