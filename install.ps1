@@ -157,6 +157,95 @@ function Get-AssetBasename {
   return "pnpm-$Platform-$Arch$LibcSuffix"
 }
 
+$NpmRegistry = 'https://registry.npmjs.org'
+
+# npm's registry signing key, mirrored from
+# https://registry.npmjs.org/-/npm/v1/keys. See the matching comment in
+# install.sh for why the key is pinned rather than fetched.
+$NpmSigningKeyId = 'SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U'
+$NpmSigningKey = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEY6Ya7W++7aUPzvMTrezH6Ycx3c+HOKYCcNGybJZSCJq/fd7Qa8uuAKtdIkUQtQiEKERhAmE5lMMJhP8OkDOa2g=='
+
+# $true / $false, or $null when this runtime cannot check ECDSA signatures.
+# Windows PowerShell 5.1 has no ImportSubjectPublicKeyInfo, so it falls back to
+# the checksum alone.
+function Test-NpmSignature {
+  param(
+    [string]$Message,
+    [string]$Signature
+  )
+  if ($PSVersionTable.PSVersion.Major -lt 7) {
+    return $null
+  }
+  try {
+    $ecdsa = [System.Security.Cryptography.ECDsa]::Create()
+    $bytesRead = 0
+    $ecdsa.ImportSubjectPublicKeyInfo([Convert]::FromBase64String($NpmSigningKey), [ref]$bytesRead)
+    return $ecdsa.VerifyData(
+      [Text.Encoding]::UTF8.GetBytes($Message),
+      [Convert]::FromBase64String($Signature),
+      [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+      [System.Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence)
+  } catch {
+    return $null
+  }
+}
+
+function Get-FileIntegrity {
+  param([string]$Path)
+  $sha512 = [System.Security.Cryptography.SHA512]::Create()
+  $stream = [IO.File]::OpenRead($Path)
+  try {
+    return 'sha512-' + [Convert]::ToBase64String($sha512.ComputeHash($stream))
+  } finally {
+    $stream.Dispose()
+  }
+}
+
+# Download <package>@<version> from the npm registry into $Destination and
+# unpack it, refusing to go on unless the registry signature and the tarball
+# checksum both check out.
+function Get-VerifiedPackage {
+  param(
+    [string]$Package,
+    [string]$Version,
+    [string]$Destination
+  )
+  $meta = (Invoke-WebRequest "$NpmRegistry/$Package/$Version" -UseBasicParsing).Content | ConvertFrom-Json
+  $integrity = $meta.dist.integrity
+  $signature = $meta.dist.signatures | Select-Object -First 1
+  if (-not $integrity) {
+    throw "The npm registry published no checksum for $Package@$Version."
+  }
+  if (-not $signature) {
+    throw "$Package@$Version carries no npm registry signature, so it cannot be verified."
+  }
+  if ($signature.keyid -ne $NpmSigningKeyId) {
+    throw "$Package@$Version is signed with an unexpected npm key ($($signature.keyid)). If npm has rotated its signing key, this installer needs updating."
+  }
+
+  $valid = Test-NpmSignature -Message "$Package@$Version`:$integrity" -Signature $signature.sig
+  if ($valid -eq $false) {
+    throw "The npm registry signature for $Package@$Version is not valid. Refusing to install."
+  } elseif ($null -eq $valid) {
+    Write-Host "PowerShell 7 is needed to check the npm signature — verifying the checksum only.`n" -ForegroundColor Yellow
+  }
+
+  $archive = Join-Path $Destination 'package.tgz'
+  Invoke-WebRequest $meta.dist.tarball -OutFile $archive -UseBasicParsing
+  if ((Get-FileIntegrity -Path $archive) -ne $integrity) {
+    throw "$Package@$Version does not match the checksum the npm registry published for it. Refusing to install."
+  }
+
+  $unpacked = Join-Path $Destination 'unpacked'
+  if (Test-Path $unpacked) {
+    Remove-Item $unpacked -Recurse -Force
+  }
+  New-Item -ItemType Directory -Path $unpacked | Out-Null
+  tar -xzf $archive -C $unpacked
+  Remove-Item $archive -Force
+  return (Join-Path $unpacked 'package')
+}
+
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $pkgInfo = Invoke-WebRequest "https://registry.npmjs.org/@pnpm/exe" -UseBasicParsing
@@ -189,14 +278,30 @@ if ($null -eq $version) {
   Write-Error "Sorry! pnpm '$preferredVersion' version could not be found. Use one of the tags or published versions from the provided list"
 }
 
-Write-Host "Downloading pnpm from GitHub...`n" -ForegroundColor Green
-
 $tempFileFolder = New-TemporaryDirectory
 $majorVersion = [int]($version -split '\.')[0]
-$assetBase = Get-AssetBasename -Version $version -Platform $platform -Arch $architecture -LibcSuffix $libcSuffix
 
-if ($majorVersion -ge 11) {
-  # v11+: distributed as tarballs containing the binary and dist/ directory
+if ($majorVersion -ge 12) {
+  # v12+ is published to the npm registry as well as to the GitHub release
+  # page, with the same executable byte for byte. Only the registry copy comes
+  # with a signature over its checksum, so that is the one worth downloading.
+  Write-Host "Downloading pnpm $version...`n" -ForegroundColor Green
+
+  $executable = if ($platform -eq 'win32') { 'pnpm.exe' } else { 'pnpm' }
+  $platformPackage = "@pnpm/exe.$platform-$architecture$libcSuffix"
+
+  $unpacked = Get-VerifiedPackage -Package $platformPackage -Version $version -Destination $tempFileFolder.FullName
+  $tempFile = Join-Path $tempFileFolder.FullName $executable
+  Move-Item (Join-Path $unpacked $executable) $tempFile
+
+  # The executable expects the `dist/` tree next to it; `@pnpm/exe` is where
+  # the registry publishes it, verified the same way.
+  $unpacked = Get-VerifiedPackage -Package '@pnpm/exe' -Version $version -Destination $tempFileFolder.FullName
+  Move-Item (Join-Path $unpacked 'dist') (Join-Path $tempFileFolder.FullName 'dist')
+} elseif ($majorVersion -ge 11) {
+  # v11: distributed as tarballs containing the binary and dist/ directory
+  Write-Host "Downloading pnpm from GitHub...`n" -ForegroundColor Green
+  $assetBase = Get-AssetBasename -Version $version -Platform $platform -Arch $architecture -LibcSuffix $libcSuffix
   if ($platform -eq 'win32') {
     $archiveUrl = "https://github.com/pnpm/pnpm/releases/download/v$version/$assetBase.zip"
     $tempArchive = Join-Path $tempFileFolder.FullName "pnpm.zip"
@@ -212,6 +317,8 @@ if ($majorVersion -ge 11) {
   }
 } else {
   # older versions: distributed as a single executable binary
+  Write-Host "Downloading pnpm from GitHub...`n" -ForegroundColor Green
+  $assetBase = Get-AssetBasename -Version $version -Platform $platform -Arch $architecture -LibcSuffix $libcSuffix
   $archiveUrl = "https://github.com/pnpm/pnpm/releases/download/v$version/$assetBase"
   if ($platform -eq 'win32') {
     $archiveUrl = "$archiveUrl.exe"

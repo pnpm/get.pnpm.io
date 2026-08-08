@@ -98,8 +98,30 @@ curl -fsSL https://keybase.io/pnpm/pgp_keys.asc | gpg --import
 ```
 
 `SHASUMS256.txt` lists the installer scripts served from this site — `install.sh`,
-`install.ps1`, and the legacy `v6*.js` installers. It does not cover the pnpm executable,
-which the installer downloads from the pnpm release for the version being installed.
+`install.ps1`, and the legacy `v6*.js` installers. What the installer downloads afterwards
+is covered separately, below.
+
+### How the downloaded executable is verified
+
+pnpm 12 and newer are downloaded from the npm registry, which publishes a signature over
+each package's checksum. The installer pins npm's public key, checks that signature, and
+then checks the downloaded file against the signed checksum. Neither a tampered download
+nor a tampered checksum passes, because the key that signs them is not one the download
+host can mint. The executable is identical to the one on the GitHub release page.
+
+Signature checking needs `openssl` (POSIX) or PowerShell 7 (Windows). Without them the
+installer falls back to the checksum alone and says so.
+
+pnpm 11 and older are downloaded from the GitHub release page, which publishes no
+signature, so those downloads are not verified. To check one yourself, GitHub attests
+every release asset:
+
+```sh
+gh attestation verify pnpm-linux-x64.tar.gz --repo pnpm/pnpm
+```
+
+That confirms the file was built by pnpm's release workflow from the signed release tag,
+and the attestation is recorded in a public transparency log.
 
 ## Configuring
 
