@@ -20,40 +20,86 @@ On Windows (PowerShell):
 iwr https://get.pnpm.io/install.ps1 -useb | iex
 ```
 
+These commands run the installer as soon as it is downloaded. To check that it is
+the script pnpm published before running it, see [Verifying files](#verifying-files).
+
 ## Verifying files
 
-To download `SHASUMS256.txt` using curl:
+The installer scripts served from this site are listed in [`SHASUMS256.txt`](https://get.pnpm.io/SHASUMS256.txt),
+which is signed with the pnpm release key. Verifying takes two steps: check that the
+checksum file carries a good signature, then check the script against its checksum.
+
+On POSIX systems:
 
 ```sh
-curl -O https://get.pnpm.io/SHASUMS256.txt
+curl -fsSLO https://get.pnpm.io/install.sh
+curl -fsSLO https://get.pnpm.io/SHASUMS256.txt
+curl -fsSLO https://get.pnpm.io/SHASUMS256.txt.sig
+
+# Import the pnpm release key (compare the fingerprint with the one below)
+curl -fsSL https://keys.openpgp.org/vks/v1/by-fingerprint/4D20AD76D7BE567214F3F8EE4EABAE7510A044FA | gpg --import
+
+gpg --verify SHASUMS256.txt.sig SHASUMS256.txt \
+  && grep ' install.sh$' SHASUMS256.txt | sha256sum -c - \
+  && sh install.sh
 ```
 
-To check that a downloaded file matches the checksum, run it through sha256sum with a command such as:
+The steps are chained, so the installer does not run unless both checks pass. The first
+prints `Good signature`, followed by the key's user IDs; the second prints `install.sh: OK`.
 
-```sh
-grep v6.16.js SHASUMS256.txt | sha256sum -c -
-```
+macOS has no `sha256sum` — use `shasum -a 256 -c -` in its place.
 
-The GPG detached signature of `SHASUMS256.txt` is in `SHASUMS256.txt.sig`.
-You can use it with `gpg` to verify the integrity of `SHASUMS256.txt`.
-You will first need to import the GPG keys of individuals authorized to create releases.
-To import the keys:
+`gpg` also prints `WARNING: The key's User ID is not certified with a trusted signature`.
+That is expected — it only means you have not personally certified the key. What
+establishes trust is the fingerprint, so compare the one `gpg` reports against the
+fingerprint published here.
 
-```sh
-curl https://keybase.io/pnpm/pgp_keys.asc | gpg --import
-```
+On Windows (PowerShell). `gpg` is not part of Windows — [Gpg4win](https://gpg4win.org)
+provides it:
 
-Next, download the `SHASUMS256.txt.sig`:
+```powershell
+iwr https://get.pnpm.io/install.ps1 -OutFile install.ps1
+iwr https://get.pnpm.io/SHASUMS256.txt -OutFile SHASUMS256.txt
+iwr https://get.pnpm.io/SHASUMS256.txt.sig -OutFile SHASUMS256.txt.sig
 
-```sh
-curl -O https://get.pnpm.io/SHASUMS256.txt.sig
-```
+# Import the pnpm release key (compare the fingerprint with the one below)
+iwr https://keys.openpgp.org/vks/v1/by-fingerprint/4D20AD76D7BE567214F3F8EE4EABAE7510A044FA -OutFile pnpm.asc
+gpg --import pnpm.asc
 
-Then use the following script to verify the file's signature:
-
-```sh
 gpg --verify SHASUMS256.txt.sig SHASUMS256.txt
+if ($LASTEXITCODE -ne 0) { throw 'SHASUMS256.txt is not signed by the pnpm release key' }
+
+$expected = (Select-String -Path SHASUMS256.txt -Pattern ' install\.ps1$').Line.Split(' ')[0]
+if ((Get-FileHash install.ps1 -Algorithm SHA256).Hash -ne $expected.ToUpper()) {
+  throw 'install.ps1 does not match its published checksum'
+}
+
+.\install.ps1
 ```
+
+Both checks stop the script rather than fall through to the installer. Skipping the
+signature step is not equivalent to running it: the checksums are served from the same
+site as the installer, so on their own they only prove the two files agree with each
+other. The signature is what ties them to the pnpm release key.
+
+### The pnpm release key
+
+| | Fingerprint |
+| --- | --- |
+| Primary key | `4D20AD76D7BE567214F3F8EE4EABAE7510A044FA` |
+| Signing subkey | `432EDF21183B9FE186AA53247CBF6055273E6CB5` |
+
+The key is published on [keys.openpgp.org](https://keys.openpgp.org/search?q=4D20AD76D7BE567214F3F8EE4EABAE7510A044FA)
+and on [Keybase](https://keybase.io/pnpm/pgp_keys.asc). Both serve the same key, so either
+source works:
+
+```sh
+curl -fsSL https://keybase.io/pnpm/pgp_keys.asc | gpg --import
+```
+
+`SHASUMS256.txt` lists the installer scripts served from this site — `install.sh`,
+`install.ps1`, and the legacy `v6*.js` installers. It does not cover the pnpm executable,
+which the installer downloads from the pnpm release for the version being installed.
 
 ## Configuring
 
