@@ -1,1 +1,3 @@
 .claude/
+get-pnpm/lib
+get-pnpm/node_modules

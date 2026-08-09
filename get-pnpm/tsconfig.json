@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "outDir": "lib",
+    "rootDir": "src",
+    "declaration": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts"]
+}
