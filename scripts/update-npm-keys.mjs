@@ -25,7 +25,7 @@ const KEYS_URL = 'https://registry.npmjs.org/-/npm/v1/keys'
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const KEY_FIELDS = ['expires', 'keyid', 'keytype', 'scheme', 'key']
 
-const JS_KEYS_FILE = path.join(ROOT, 'npm', 'src', 'npmSigningKeys.ts')
+const JS_KEYS_FILE = path.join(ROOT, 'get-pnpm', 'src', 'npmSigningKeys.ts')
 const SH_FILE = path.join(ROOT, 'install.sh')
 const PS_FILE = path.join(ROOT, 'install.ps1')
 

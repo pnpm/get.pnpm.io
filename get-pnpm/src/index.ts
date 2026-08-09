@@ -84,16 +84,6 @@ export async function installPnpm (
     keys?: readonly SigningKey[]
   }
 ): Promise<number> {
-  const packument = await fetchPackument(opts.registry, CLI_PKG_NAME)
-  const version = resolveVersion(packument, opts.versionSpec)
-  const major = majorVersion(version)
-  const platformPkgName = platformPackageName({
-    major,
-    platform: process.platform,
-    arch: process.arch,
-    musl: isMusl(),
-  })
-
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pnpm-install-'))
   const removeTmpDir = (): void => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
@@ -110,9 +100,53 @@ export async function installPnpm (
     process.once(signal, onSignal)
   }
   try {
+    const { binPath } = await downloadPnpm({ ...opts, dest: tmpDir })
+    const { error, status } = spawnSync(binPath, ['setup', '--force'], { stdio: 'inherit' })
+    if (error != null) throw error
+    return status ?? 1
+  } finally {
+    for (const signal of signals) {
+      process.off(signal, onSignal)
+    }
+    removeTmpDir()
+  }
+}
+
+/**
+ * Downloads the pnpm executable into `dest`, laid out the way the release
+ * tarball lays it out — the executable next to the `dist/` tree it loads.
+ *
+ * Every download is checked against the checksum the registry published for it,
+ * and that checksum against npm's signature; see `verifyRegistrySignature`.
+ * Nothing outside `dest` is touched, so a caller that manages its own PATH — a
+ * CI action, say — can use this without the global install `installPnpm` does.
+ *
+ * @returns the version installed and the path to the executable.
+ */
+export async function downloadPnpm (
+  opts: {
+    versionSpec: string
+    registry: string
+    dest: string
+    keys?: readonly SigningKey[]
+  }
+): Promise<{ version: string, binPath: string }> {
+  const packument = await fetchPackument(opts.registry, CLI_PKG_NAME)
+  const version = resolveVersion(packument, opts.versionSpec)
+  const major = majorVersion(version)
+  const platformPkgName = platformPackageName({
+    major,
+    platform: process.platform,
+    arch: process.arch,
+    musl: isMusl(),
+  })
+
+  const { dest } = opts
+  fs.mkdirSync(dest, { recursive: true })
+  try {
     console.log(`==> Downloading pnpm ${version}`)
     const executable = process.platform === 'win32' ? 'pnpm.exe' : 'pnpm'
-    const fetchPackage = verifiedPackageFetcher({ dir: tmpDir, registry: opts.registry, version, keys: opts.keys })
+    const fetchPackage = verifiedPackageFetcher({ dir: dest, registry: opts.registry, version, keys: opts.keys })
 
     // Settled, not `all`: a rejection there would leave the other fetch writing
     // into the directory the `finally` below is about to remove.
@@ -127,25 +161,19 @@ export async function installPnpm (
     const platformPkg = platformResult.value
     const wrapperPkg = wrapperResult.value
 
-    const binPath = path.join(tmpDir, executable)
+    const binPath = path.join(dest, executable)
     fs.renameSync(path.join(platformPkg.dir, executable), binPath)
     fs.chmodSync(binPath, 0o755)
     if (wrapperPkg != null) {
-      fs.renameSync(path.join(wrapperPkg.dir, 'dist'), path.join(tmpDir, 'dist'))
-      writeManifest({ tmpDir, executable, version, wrapperDir: wrapperPkg.dir, major })
+      fs.rmSync(path.join(dest, 'dist'), { recursive: true, force: true })
+      fs.renameSync(path.join(wrapperPkg.dir, 'dist'), path.join(dest, 'dist'))
+      writeManifest({ dest, executable, version, wrapperDir: wrapperPkg.dir, major })
     }
-    // `setup` installs this directory as a package, so nothing may be left in
-    // it that does not belong in the installation.
-    fs.rmSync(path.join(tmpDir, UNPACK_DIR), { recursive: true, force: true })
-
-    const { error, status } = spawnSync(binPath, ['setup', '--force'], { stdio: 'inherit' })
-    if (error != null) throw error
-    return status ?? 1
+    return { version, binPath }
   } finally {
-    for (const signal of signals) {
-      process.off(signal, onSignal)
-    }
-    removeTmpDir()
+    // `pnpm setup` installs this directory as a package, so nothing may be left
+    // in it that does not belong in the installation.
+    fs.rmSync(path.join(dest, UNPACK_DIR), { recursive: true, force: true })
   }
 }
 
@@ -159,12 +187,12 @@ export async function installPnpm (
  * `setup` writes is left to it.
  */
 function writeManifest (
-  opts: { tmpDir: string, executable: string, version: string, wrapperDir: string, major: number }
+  opts: { dest: string, executable: string, version: string, wrapperDir: string, major: number }
 ): void {
   if (opts.major >= 12) return
   const wrapper = JSON.parse(fs.readFileSync(path.join(opts.wrapperDir, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> }
   if (wrapper.dependencies == null) return
-  fs.writeFileSync(path.join(opts.tmpDir, 'package.json'), JSON.stringify({
+  fs.writeFileSync(path.join(opts.dest, 'package.json'), JSON.stringify({
     name: '@pnpm/exe',
     version: opts.version,
     type: 'module',

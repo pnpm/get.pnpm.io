@@ -25,7 +25,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        working-directory: npm
+        working-directory: get-pnpm
 
     steps:
       - uses: actions/checkout@v7

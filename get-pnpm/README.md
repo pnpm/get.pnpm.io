@@ -42,6 +42,23 @@ The download goes to the registry npm is configured with (`npm_config_registry`)
 | `PNPM_HOME` | Directory to install pnpm into. |
 | `npm_config_registry` | Registry to download pnpm from. |
 
+## Using it from a program
+
+`installPnpm` does what the command does: download, verify, then hand over to
+`pnpm setup`, which installs globally and edits your `PATH`. A caller that
+manages its own directory — a CI action, say — wants `downloadPnpm` instead,
+which verifies and places the executable and nothing else:
+
+```js
+import { downloadPnpm } from 'get-pnpm'
+
+const { version, binPath } = await downloadPnpm({
+  versionSpec: 'next-12',
+  registry: 'https://registry.npmjs.org/',
+  dest: '/opt/pnpm',
+})
+```
+
 ## Development
 
 ```sh

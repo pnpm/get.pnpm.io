@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
-import { installPnpm } from '../lib/index.js'
+import { downloadPnpm, installPnpm } from '../lib/index.js'
 import type { SigningKey } from '../lib/verifySignature.js'
 
 const VERSION = '99.0.0'
@@ -102,6 +102,23 @@ describe('installPnpm', { skip: process.platform === 'win32' }, () => {
     mode = 'ok'
     assert.equal(await install(), 0)
     assert.equal(fs.readFileSync(setupLog, 'utf8'), 'setup --force\nworker.js\n')
+  })
+
+  test('downloadPnpm places the executable without running setup', async () => {
+    mode = 'ok'
+    const dest = path.join(tmpDir, 'dest')
+    fs.rmSync(setupLog, { force: true })
+    const { version, binPath } = await downloadPnpm({ versionSpec: 'latest', registry, dest, keys: KEYS })
+
+    assert.equal(version, VERSION)
+    assert.equal(binPath, path.join(dest, 'pnpm'))
+    assert.ok(fs.existsSync(path.join(dest, 'dist', 'worker.js')), 'dist/ is placed beside the executable')
+    assert.ok(!fs.existsSync(setupLog), 'setup is not run')
+    // Nothing but the installation: an unpack directory left here would be
+    // installed too by a caller that hands the directory to `pnpm setup`. No
+    // manifest either — the fixture is a v12-shaped release, whose `dist/` is
+    // self-contained.
+    assert.deepEqual(fs.readdirSync(dest).sort(), ['dist', 'pnpm'])
   })
 
   test('leaves no temporary directory behind', async () => {
