@@ -27,12 +27,10 @@ export interface DownloadExecutableOptions {
   /** Overrides the pinned npm signing keys. */
   keys?: readonly SigningKey[]
   /**
-   * Whether the registry's signature over the checksum has to check out.
-   *
-   * Only a caller downloading from a registry that does not carry npm's
-   * signatures — a private mirror that re-published the package — has any
-   * business turning this off, and only having accepted that the checksum then
-   * comes from the same place as the bytes it vouches for. Defaults to `true`.
+   * Whether the registry's signature over the checksum has to check out;
+   * `true` unless set. Waiving it is for a registry that carries no npm
+   * signatures — one that re-published the package — and accepts that the
+   * checksum then comes from the same host as the bytes it vouches for.
    */
   verifySignature?: boolean
 }
@@ -48,9 +46,8 @@ export interface DownloadExecutableOptions {
  *
  * The download is checked against the checksum the registry published for it,
  * and that checksum against npm's signature, exactly as {@link downloadPnpm}
- * does. Nothing is written to `destPath` until both pass — unless the caller
- * waived the signature, which is a decision only it can make; see
- * {@link DownloadExecutableOptions.verifySignature}.
+ * does; nothing is written to `destPath` until both pass. See
+ * {@link DownloadExecutableOptions.verifySignature} for the one waiver.
  *
  * Placement is atomic and tolerates losing a race: a concurrent call that got
  * there first keeps its copy, since both placed the same verified bytes.
