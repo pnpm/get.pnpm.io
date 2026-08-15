@@ -24,7 +24,7 @@ const KEYS: SigningKey[] = [{
 }]
 
 /** One thing broken per run, to drive each refusal separately. */
-type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'no-integrity' | 'no-executable' | 'npm-tarball-url' | 'truncated'
+type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'unsigned' | 'no-integrity' | 'no-executable' | 'npm-tarball-url' | 'truncated'
 
 let tmpDir: string
 let server: http.Server
@@ -82,10 +82,12 @@ describe('downloadPnpmExecutable', () => {
               ? `https://registry.npmjs.org/${name}/-/tarball.tgz`
               : `${addressOf(cdn)}/${name}/-/tarball.tgz`,
             ...(mode === 'no-integrity' ? {} : { integrity }),
-            signatures: [{
-              keyid: KEYS[0]!.keyid,
-              sig: createSign('SHA256').update(`${name}@${VERSION}:${signed}`).sign(privateKey, 'base64'),
-            }],
+            signatures: mode === 'unsigned'
+              ? []
+              : [{
+                keyid: KEYS[0]!.keyid,
+                sig: createSign('SHA256').update(`${name}@${VERSION}:${signed}`).sign(privateKey, 'base64'),
+              }],
           },
         }))
         return
@@ -202,6 +204,31 @@ describe('downloadPnpmExecutable', () => {
 
     await assert.rejects(download(destPath), /is not valid/)
     assert.deepEqual(fs.readdirSync(path.dirname(destPath)), [])
+  })
+
+  test('refuses an unsigned package', async () => {
+    mode = 'unsigned'
+
+    await assert.rejects(download(destIn('unsigned')), /carries no npm registry signature/)
+  })
+
+  test('takes an unsigned package when the caller waives the signature', async () => {
+    mode = 'unsigned'
+    const destPath = destIn('signature-waived')
+
+    await downloadPnpmExecutable({ version: VERSION, registry, destPath, verifySignature: false })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+  })
+
+  test('still checks the checksum when the caller waives the signature', async () => {
+    mode = 'bad-tarball'
+    const destPath = destIn('waived-but-tampered')
+
+    await assert.rejects(
+      downloadPnpmExecutable({ version: VERSION, registry, destPath, verifySignature: false }),
+      /does not match the checksum/
+    )
   })
 
   test('refuses a package the registry published no checksum for', async () => {

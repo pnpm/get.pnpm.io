@@ -82,6 +82,12 @@ It verifies exactly what the other two do, and reads the archive in-process
 rather than shelling out to `tar`, so it works where no `tar` is on the PATH.
 Placement is atomic and tolerates losing a race with a concurrent call.
 
+Pass `keys` to trust a signing key other than the pinned npm one, or
+`verifySignature: false` to download from a registry that carries no npm
+signatures at all — a private mirror that re-published the package. The checksum
+is still enforced either way; what is lost is the assurance that it came from
+somewhere other than the host that served the bytes.
+
 ## Development
 
 ```sh

@@ -24,8 +24,17 @@ export interface DownloadExecutableOptions {
   destPath: string
   /** Credentials for `registry`, withheld from any other origin. */
   headers?: RequestHeaders
-  /** Overrides the pinned npm signing keys; for tests. */
+  /** Overrides the pinned npm signing keys. */
   keys?: readonly SigningKey[]
+  /**
+   * Whether the registry's signature over the checksum has to check out.
+   *
+   * Only a caller downloading from a registry that does not carry npm's
+   * signatures — a private mirror that re-published the package — has any
+   * business turning this off, and only having accepted that the checksum then
+   * comes from the same place as the bytes it vouches for. Defaults to `true`.
+   */
+  verifySignature?: boolean
 }
 
 /**
@@ -39,7 +48,9 @@ export interface DownloadExecutableOptions {
  *
  * The download is checked against the checksum the registry published for it,
  * and that checksum against npm's signature, exactly as {@link downloadPnpm}
- * does. Nothing is written to `destPath` until both pass.
+ * does. Nothing is written to `destPath` until both pass — unless the caller
+ * waived the signature, which is a decision only it can make; see
+ * {@link DownloadExecutableOptions.verifySignature}.
  *
  * Placement is atomic and tolerates losing a race: a concurrent call that got
  * there first keeps its copy, since both placed the same verified bytes.
@@ -60,13 +71,15 @@ export async function downloadPnpmExecutable (opts: DownloadExecutableOptions): 
   if (!meta.dist.integrity) {
     throw new Error(`The npm registry published no checksum for ${packageName}@${version}, so it cannot be verified.`)
   }
-  verifyRegistrySignature({
-    name: packageName,
-    version,
-    integrity: meta.dist.integrity,
-    signatures: meta.dist.signatures,
-    keys: opts.keys,
-  })
+  if (opts.verifySignature !== false) {
+    verifyRegistrySignature({
+      name: packageName,
+      version,
+      integrity: meta.dist.integrity,
+      signatures: meta.dist.signatures,
+      keys: opts.keys,
+    })
+  }
 
   const scratch = `${destPath}.${randomBytes(6).toString('hex')}`
   const tarball = `${scratch}.tgz`
