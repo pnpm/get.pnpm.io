@@ -6,6 +6,7 @@ import { extractTarballMember } from './extractTarballMember.js'
 import { isMusl, platformPackageName } from './platformPackageName.js'
 import { downloadTarball, fetchVersionMeta, normalizeRegistry, type RequestHeaders } from './registry.js'
 import { majorVersion } from './resolveVersion.js'
+import { sameFileContents } from './sameFileContents.js'
 import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
 
 /** Name the executable is published under inside its platform package. */
@@ -94,10 +95,12 @@ const DESTINATION_IN_USE = new Set(['EPERM', 'EACCES', 'EBUSY'])
 
 /**
  * Moves the verified executable into place, keeping the copy a concurrent call
- * placed if that is what stops the rename. Anything else — no permission on the
- * directory, a directory or symlink sitting at `destPath` — is a failure, since
- * whatever is there then did not come from this function and is not the
- * executable the caller asked for.
+ * placed if that is what stops the rename.
+ *
+ * A lost race is not assumed from the failure alone: the copy already there has
+ * to hold the same bytes as the one just verified, or this call has no idea
+ * what it would be reporting success for. Anything else — no permission on the
+ * directory, a directory or an unrelated file at `destPath` — is a failure.
  */
 function place (staged: string, destPath: string): void {
   try {
@@ -105,6 +108,6 @@ function place (staged: string, destPath: string): void {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code ?? ''
     if (!DESTINATION_IN_USE.has(code)) throw err
-    if (fs.lstatSync(destPath, { throwIfNoEntry: false })?.isFile() !== true) throw err
+    if (!sameFileContents(staged, destPath)) throw err
   }
 }
