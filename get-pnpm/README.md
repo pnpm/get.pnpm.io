@@ -32,7 +32,7 @@ and its checksum, so a checksum taken from it proves nothing on its own; npm als
 signs `<name>@<version>:<integrity>` with a key that this package pins, and a
 download that fails either check is refused rather than installed.
 
-The download goes to the registry npm is configured with (`npm_config_registry`), not to GitHub. The command does not support registries that require authentication; `downloadPnpmExecutable` takes request headers for one.
+The download goes to the registry npm is configured with (`npm_config_registry`), not to GitHub — including the tarball itself, so a registry that proxies npm and hands back an npmjs.org URL does not send the download off the mirror. The command does not support registries that require authentication; `downloadPnpmExecutable` takes request headers for one.
 
 ## Environment variables
 

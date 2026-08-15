@@ -224,7 +224,7 @@ function verifiedPackageFetcher (
     const unpackDir = path.join(opts.dir, UNPACK_DIR, pkgName.replaceAll('/', '-'))
     const tarball = `${unpackDir}.tgz`
     fs.mkdirSync(path.dirname(tarball), { recursive: true })
-    await downloadTarball(meta, tarball)
+    await downloadTarball(meta, tarball, { registry: opts.registry })
     extractTarball(tarball, unpackDir)
     fs.rmSync(tarball)
     return { dir: path.join(unpackDir, 'package') }
