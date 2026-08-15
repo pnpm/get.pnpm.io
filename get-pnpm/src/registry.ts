@@ -22,7 +22,16 @@ export const DEFAULT_REGISTRY = 'https://registry.npmjs.org/'
 
 /** The registry npx/npm is configured with, so a mirror stays a mirror. */
 export function registryFromEnv (): string {
-  const registry = process.env.npm_config_registry ?? process.env.NPM_CONFIG_REGISTRY ?? DEFAULT_REGISTRY
+  return normalizeRegistry(process.env.npm_config_registry ?? process.env.NPM_CONFIG_REGISTRY ?? DEFAULT_REGISTRY)
+}
+
+/**
+ * A registry URL that can be used as a base for a relative path.
+ *
+ * `new URL('pkg', 'https://mirror.example.com/npm')` drops the last segment,
+ * so a registry served from a subpath needs its trailing slash to survive.
+ */
+export function normalizeRegistry (registry: string): string {
   return registry.endsWith('/') ? registry : `${registry}/`
 }
 
@@ -67,7 +76,7 @@ export async function downloadTarball (meta: VersionMeta, dest: string, opts: Ta
   )
   const actual = hash.digest('base64')
   if (actual !== expected) {
-    throw new Error(`The download from ${meta.dist.tarball} does not match the checksum the npm registry published for it. Refusing to install.`)
+    throw new Error(`The download from ${url.href} does not match the checksum the npm registry published for it. Refusing to install.`)
   }
 }
 
@@ -89,7 +98,7 @@ export interface TarballOptions {
 export function tarballUrl (meta: VersionMeta, registry?: string): URL {
   const url = new URL(meta.dist.tarball)
   if (registry == null || url.origin !== new URL(DEFAULT_REGISTRY).origin) return url
-  return new URL(`${url.pathname.replace(/^\//, '')}${url.search}`, registry)
+  return new URL(`${url.pathname.replace(/^\//, '')}${url.search}`, normalizeRegistry(registry))
 }
 
 function headersFor (url: URL, opts: TarballOptions): RequestHeaders | undefined {

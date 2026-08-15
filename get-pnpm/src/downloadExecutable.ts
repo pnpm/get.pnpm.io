@@ -4,7 +4,7 @@ import path from 'node:path'
 
 import { extractTarballMember } from './extractTarballMember.js'
 import { isMusl, platformPackageName } from './platformPackageName.js'
-import { downloadTarball, fetchVersionMeta, type RequestHeaders } from './registry.js'
+import { downloadTarball, fetchVersionMeta, normalizeRegistry, type RequestHeaders } from './registry.js'
 import { majorVersion } from './resolveVersion.js'
 import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
 
@@ -16,7 +16,8 @@ function executableName (): string {
 export interface DownloadExecutableOptions {
   /** Exact version to download; nothing is resolved against dist-tags. */
   version: string
-  /** Registry to download from, e.g. from {@link registryFromEnv}. */
+  /** Registry to download from, e.g. from {@link registryFromEnv}; a subpath
+   * one keeps its subpath whether or not it ends in a slash. */
   registry: string
   /** Path to place the executable at. */
   destPath: string
@@ -45,7 +46,8 @@ export interface DownloadExecutableOptions {
  * @returns the package the executable came from.
  */
 export async function downloadPnpmExecutable (opts: DownloadExecutableOptions): Promise<{ packageName: string }> {
-  const { version, registry, destPath } = opts
+  const { version, destPath } = opts
+  const registry = normalizeRegistry(opts.registry)
   const packageName = platformPackageName({
     major: majorVersion(version),
     platform: process.platform,
@@ -84,15 +86,25 @@ export async function downloadPnpmExecutable (opts: DownloadExecutableOptions): 
 }
 
 /**
- * Moves the verified executable into place, keeping whatever a concurrent call
- * already put there — on Windows the rename fails outright once that copy is
- * being executed. What is in the way has to be a plain file: a directory or a
- * symlink is not something this function leaves behind.
+ * The codes Windows fails a rename with when the destination is held open —
+ * which is what a concurrent call executing the copy it just placed looks like.
+ * POSIX replaces the destination instead, so a failure there is a real one.
+ */
+const DESTINATION_IN_USE = new Set(['EPERM', 'EACCES', 'EBUSY'])
+
+/**
+ * Moves the verified executable into place, keeping the copy a concurrent call
+ * placed if that is what stops the rename. Anything else — no permission on the
+ * directory, a directory or symlink sitting at `destPath` — is a failure, since
+ * whatever is there then did not come from this function and is not the
+ * executable the caller asked for.
  */
 function place (staged: string, destPath: string): void {
   try {
     fs.renameSync(staged, destPath)
   } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code ?? ''
+    if (!DESTINATION_IN_USE.has(code)) throw err
     if (fs.lstatSync(destPath, { throwIfNoEntry: false })?.isFile() !== true) throw err
   }
 }

@@ -42,14 +42,18 @@ export async function extractTarballMember (
         // The archive ends with zero-filled blocks; one is enough to stop.
         if (header == null || header[0] === 0) return
         const entry = parseHeader(header)
-        const padded = Math.ceil(entry.size / BLOCK_SIZE) * BLOCK_SIZE
-        if (!found && FILE_TYPES.has(entry.type) && entry.path === memberPath) {
+        if (FILE_TYPES.has(entry.type) && entry.path === memberPath) {
+          const written = await reader.pipe(entry.size, createWriteStream(dest, { flags: 'wx', mode }))
+          if (written !== entry.size) {
+            throw new Error(`${tarball} ends after ${written} of the ${entry.size} bytes it declares for ${memberPath}.`)
+          }
           found = true
-          await reader.pipe(entry.size, createWriteStream(dest, { flags: 'wx', mode }))
-          await reader.skip(padded - entry.size)
-        } else {
-          await reader.skip(padded)
+          // The rest of the archive holds nothing this caller asked for, and
+          // the checksum that vouches for it was checked before any of it was
+          // read.
+          return
         }
+        await reader.skip(Math.ceil(entry.size / BLOCK_SIZE) * BLOCK_SIZE)
       }
     }
   )
@@ -78,10 +82,6 @@ function readString (header: Buffer, start: number, length: number): string {
   return field.toString('utf8', 0, end === -1 ? field.length : end)
 }
 
-/**
- * Turns the arbitrary chunks a stream arrives in into the fixed-size reads a
- * tar archive is made of.
- */
 class BlockReader {
   readonly #iterator: AsyncIterator<Buffer>
   #buffered: Buffer[] = []
@@ -106,12 +106,17 @@ class BlockReader {
     }
   }
 
-  /** Hands the next `size` bytes to `destination`, without collecting them. */
-  async pipe (size: number, destination: NodeJS.WritableStream): Promise<void> {
+  /**
+   * Hands the next `size` bytes to `destination`, without collecting them.
+   *
+   * @returns how many bytes there were, which is fewer than `size` only when
+   * the stream ended early.
+   */
+  async pipe (size: number, destination: NodeJS.WritableStream): Promise<number> {
     const self = this
+    let left = size
     await pipeline(
       async function * (): AsyncGenerator<Buffer> {
-        let left = size
         while (left > 0) {
           if (!await self.#fill(1)) return
           const chunk = self.#take(Math.min(left, self.#buffedBytes))
@@ -121,6 +126,7 @@ class BlockReader {
       },
       destination
     )
+    return size - left
   }
 
   /** Reads until at least `size` bytes are buffered, or the stream ends. */

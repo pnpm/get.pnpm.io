@@ -31,9 +31,12 @@ export function resolveVersion (packument: Packument, spec: string): string {
 
 /** The major of an exact version, as the package layout depends on it. */
 export function majorVersion (version: string): number {
-  const major = Number(version.split('.')[0])
-  if (!Number.isInteger(major)) {
+  const field = version.split('.')[0] ?? ''
+  // Digits only: `Number` reads '' as 0 and '0x10' as 16, and a caller-supplied
+  // version that means neither should say so here rather than fail later as a
+  // package name nobody publishes.
+  if (!/^\d+$/.test(field)) {
     throw new Error(`Could not read a major version from "${version}".`)
   }
-  return major
+  return Number(field)
 }

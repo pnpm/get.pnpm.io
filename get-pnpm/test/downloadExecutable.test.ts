@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
+import zlib from 'node:zlib'
 import { after, before, beforeEach, describe, test } from 'node:test'
 
 import { downloadPnpmExecutable, platformPackageName } from '../lib/index.js'
@@ -23,7 +24,7 @@ const KEYS: SigningKey[] = [{
 }]
 
 /** One thing broken per run, to drive each refusal separately. */
-type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'no-integrity' | 'no-executable' | 'npm-tarball-url'
+type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'no-integrity' | 'no-executable' | 'npm-tarball-url' | 'truncated'
 
 let tmpDir: string
 let server: http.Server
@@ -39,9 +40,17 @@ describe('downloadPnpmExecutable', () => {
     const tarballs = {
       ok: packTarball('ok', { [EXECUTABLE]: CONTENT }),
       empty: packTarball('empty', { 'README.md': 'nothing to run here\n' }),
+      // Big enough to span several blocks, so cutting the tail leaves the
+      // executable's declared size unmet rather than merely losing padding.
+      truncated: truncate(packTarball('big', { [EXECUTABLE]: 'x'.repeat(5000) })),
+    }
+    const bytesFor = (mode: Mode): Buffer => {
+      if (mode === 'no-executable') return fs.readFileSync(tarballs.empty)
+      if (mode === 'truncated') return fs.readFileSync(tarballs.truncated)
+      return fs.readFileSync(tarballs.ok)
     }
     const serveTarball = (res: http.ServerResponse): void => {
-      const bytes = fs.readFileSync(tarballs[mode === 'no-executable' ? 'empty' : 'ok'])
+      const bytes = bytesFor(mode)
       res.writeHead(200, { 'content-type': 'application/octet-stream' })
       res.end(mode === 'bad-tarball' ? Buffer.concat([bytes, Buffer.from('tampered')]) : bytes)
     }
@@ -56,9 +65,10 @@ describe('downloadPnpmExecutable', () => {
       const url = decodeURIComponent(req.url!)
       requests.push({ path: url, authorization: req.headers.authorization })
       if (url.endsWith(`/${VERSION}`)) {
-        const name = url.slice(1, url.lastIndexOf('/'))
-        const bytes = fs.readFileSync(tarballs[mode === 'no-executable' ? 'empty' : 'ok'])
-        const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`
+        // The registry may be served from a subpath, which is not part of the
+        // package name the signature covers.
+        const name = url.slice(1, url.lastIndexOf('/')).replace(/^npm\//, '')
+        const integrity = `sha512-${createHash('sha512').update(bytesFor(mode)).digest('base64')}`
         // Signing a checksum other than the one served is what a tampered
         // checksum looks like: bytes and metadata agree, the signature does not
         // cover them.
@@ -140,7 +150,24 @@ describe('downloadPnpmExecutable', () => {
     assert.equal(cdnRequests.length, 0, 'the download stayed on the registry')
   })
 
-  test('keeps an executable a concurrent call already placed', async () => {
+  test('keeps a registry subpath that does not end in a slash', async () => {
+    const destPath = destIn('subpath')
+
+    await downloadPnpmExecutable({ version: VERSION, registry: `${addressOf(server)}/npm`, destPath, keys: KEYS })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.deepEqual(requests.map(({ path: asked }) => asked), [`/npm/${packageNameFor()}/${VERSION}`])
+  })
+
+  test('refuses an archive that ends inside the executable', async () => {
+    mode = 'truncated'
+    const destPath = destIn('truncated')
+
+    await assert.rejects(download(destPath), /ends after \d+ of the 5000 bytes/)
+    assert.deepEqual(fs.readdirSync(path.dirname(destPath)), [])
+  })
+
+  test('accepts an executable a concurrent call already placed', async () => {
     const destPath = destIn('raced')
     fs.writeFileSync(destPath, CONTENT)
 
@@ -205,6 +232,23 @@ function destIn (name: string): string {
   const dir = path.join(tmpDir, name)
   fs.mkdirSync(dir, { recursive: true })
   return path.join(dir, EXECUTABLE)
+}
+
+/**
+ * Cuts an archive off one block into the executable, so the entry declares more
+ * than the archive holds. Located rather than measured from the end, because
+ * tar pads an archive out to a record far longer than its content.
+ */
+function truncate (tarball: string): string {
+  const unpacked = zlib.gunzipSync(fs.readFileSync(tarball))
+  for (let offset = 0; offset + 512 <= unpacked.length; offset += 512) {
+    const name = unpacked.toString('utf8', offset, offset + 100).replace(/\0.*$/s, '')
+    if (name !== `package/${EXECUTABLE}`) continue
+    const cut = path.join(tmpDir, 'truncated.tgz')
+    fs.writeFileSync(cut, zlib.gzipSync(unpacked.subarray(0, offset + 512 + 512)))
+    return cut
+  }
+  throw new Error(`no ${EXECUTABLE} entry to truncate in ${tarball}`)
 }
 
 function packTarball (name: string, files: Record<string, string>): string {
