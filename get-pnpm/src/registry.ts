@@ -5,6 +5,9 @@ import { pipeline } from 'node:stream/promises'
 import type { Packument } from './resolveVersion.js'
 import type { PackageSignature } from './verifySignature.js'
 
+/** Request headers, for a registry that needs credentials. */
+export type RequestHeaders = Record<string, string>
+
 export interface VersionMeta {
   dist: {
     tarball: string
@@ -30,21 +33,26 @@ export function registryFromEnv (): string {
 const METADATA_TIMEOUT_MS = 30_000
 const TARBALL_TIMEOUT_MS = 15 * 60_000
 
-export async function fetchPackument (registry: string, pkgName: string): Promise<Packument> {
-  return fetchJson<Packument>(new URL(pkgName, registry), ABBREVIATED_PACKUMENT)
+export async function fetchPackument (registry: string, pkgName: string, headers?: RequestHeaders): Promise<Packument> {
+  return fetchJson<Packument>(new URL(pkgName, registry), ABBREVIATED_PACKUMENT, headers)
 }
 
-export async function fetchVersionMeta (registry: string, pkgName: string, version: string): Promise<VersionMeta> {
-  return fetchJson<VersionMeta>(new URL(`${pkgName}/${version}`, registry), 'application/json')
+export async function fetchVersionMeta (registry: string, pkgName: string, version: string, headers?: RequestHeaders): Promise<VersionMeta> {
+  return fetchJson<VersionMeta>(new URL(`${pkgName}/${version}`, registry), 'application/json', headers)
 }
 
 /**
  * Streams `meta.dist.tarball` to `dest`, verifying the checksum the registry
  * published for it. A mismatch removes nothing — the caller discards the whole
  * temporary directory.
+ *
+ * `registry` re-hosts a tarball URL that points at npm onto that registry, so a
+ * mirror that answered the metadata request serves the download too; `headers`
+ * travel only to the registry's own origin, never to a download host it names.
  */
-export async function downloadTarball (meta: VersionMeta, dest: string): Promise<void> {
-  const response = await request(new URL(meta.dist.tarball), undefined, TARBALL_TIMEOUT_MS)
+export async function downloadTarball (meta: VersionMeta, dest: string, opts: TarballOptions = {}): Promise<void> {
+  const url = tarballUrl(meta, opts.registry)
+  const response = await request(url, undefined, TARBALL_TIMEOUT_MS, headersFor(url, opts))
   const [algorithm, expected] = checksum(meta)
   const hash = createHash(algorithm)
   const body = response.body as unknown as AsyncIterable<Uint8Array>
@@ -61,6 +69,32 @@ export async function downloadTarball (meta: VersionMeta, dest: string): Promise
   if (actual !== expected) {
     throw new Error(`The download from ${meta.dist.tarball} does not match the checksum the npm registry published for it. Refusing to install.`)
   }
+}
+
+export interface TarballOptions {
+  /** Registry the metadata came from, to re-host an npm tarball URL onto. */
+  registry?: string
+  /** Credentials for `registry`, withheld from any other origin. */
+  headers?: RequestHeaders
+}
+
+/**
+ * Where to download `meta`'s tarball from.
+ *
+ * Registries that proxy npm hand back npm's own URL. Following it would leave
+ * the mirror the metadata came from — for an air-gapped one, it would not
+ * resolve at all — so the path is re-hosted onto `registry`. Matched by origin,
+ * so a host that merely starts with npm's is left alone.
+ */
+export function tarballUrl (meta: VersionMeta, registry?: string): URL {
+  const url = new URL(meta.dist.tarball)
+  if (registry == null || url.origin !== new URL(DEFAULT_REGISTRY).origin) return url
+  return new URL(`${url.pathname.replace(/^\//, '')}${url.search}`, registry)
+}
+
+function headersFor (url: URL, opts: TarballOptions): RequestHeaders | undefined {
+  if (opts.headers == null || opts.registry == null) return undefined
+  return url.origin === new URL(opts.registry).origin ? opts.headers : undefined
 }
 
 /**
@@ -83,17 +117,17 @@ function checksum (meta: VersionMeta): [algorithm: string, expected: string] {
   return [entry.slice(0, separator), entry.slice(separator + 1)]
 }
 
-async function fetchJson<T> (url: URL, accept: string): Promise<T> {
-  const response = await request(url, accept, METADATA_TIMEOUT_MS)
+async function fetchJson<T> (url: URL, accept: string, headers?: RequestHeaders): Promise<T> {
+  const response = await request(url, accept, METADATA_TIMEOUT_MS, headers)
   return await response.json() as T
 }
 
-async function request (url: URL, accept: string | undefined, timeoutMs: number): Promise<Response> {
+async function request (url: URL, accept: string | undefined, timeoutMs: number, headers?: RequestHeaders): Promise<Response> {
   let response: Response
   try {
     response = await fetch(url, {
       signal: AbortSignal.timeout(timeoutMs),
-      ...(accept ? { headers: { accept } } : {}),
+      headers: { ...headers, ...(accept ? { accept } : {}) },
     })
   } catch (err) {
     const reason = (err as Error).name === 'TimeoutError'

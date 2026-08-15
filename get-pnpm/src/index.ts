@@ -6,12 +6,14 @@ import path from 'node:path'
 import { extractTarball } from './extractTarball.js'
 import { isMusl, platformPackageName } from './platformPackageName.js'
 import { downloadTarball, fetchPackument, fetchVersionMeta, registryFromEnv } from './registry.js'
-import { resolveVersion } from './resolveVersion.js'
+import { majorVersion, resolveVersion } from './resolveVersion.js'
 import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
 
+export { type DownloadExecutableOptions, downloadPnpmExecutable } from './downloadExecutable.js'
+export { extractTarballMember } from './extractTarballMember.js'
 export { isMusl, platformPackageName, type Target } from './platformPackageName.js'
-export { DEFAULT_REGISTRY, registryFromEnv } from './registry.js'
-export { type Packument, resolveVersion } from './resolveVersion.js'
+export { DEFAULT_REGISTRY, registryFromEnv, type RequestHeaders } from './registry.js'
+export { type Packument, majorVersion, resolveVersion } from './resolveVersion.js'
 export { type PackageSignature, type SigningKey, verifyRegistrySignature } from './verifySignature.js'
 
 /**
@@ -227,12 +229,4 @@ function verifiedPackageFetcher (
     fs.rmSync(tarball)
     return { dir: path.join(unpackDir, 'package') }
   }
-}
-
-function majorVersion (version: string): number {
-  const major = Number(version.split('.')[0])
-  if (!Number.isInteger(major)) {
-    throw new Error(`Could not read a major version from "${version}".`)
-  }
-  return major
 }

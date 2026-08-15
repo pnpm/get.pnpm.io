@@ -28,3 +28,12 @@ export function resolveVersion (packument: Packument, spec: string): string {
 
   throw new Error(`Sorry! pnpm version "${spec}" could not be found. Available tags: ${Object.keys(distTags).sort().join(', ')}`)
 }
+
+/** The major of an exact version, as the package layout depends on it. */
+export function majorVersion (version: string): number {
+  const major = Number(version.split('.')[0])
+  if (!Number.isInteger(major)) {
+    throw new Error(`Could not read a major version from "${version}".`)
+  }
+  return major
+}
