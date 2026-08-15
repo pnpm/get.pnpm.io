@@ -150,11 +150,15 @@ describe('downloadPnpmExecutable', () => {
     assert.deepEqual(fs.readdirSync(path.dirname(destPath)), [path.basename(destPath)])
   })
 
+  // The errno differs per platform — EISDIR on Linux, EPERM on Windows — so
+  // what is asserted is that the directory survives rather than how it says so.
   test('refuses a destination that is not a file', async () => {
     const destPath = destIn('directory')
     fs.mkdirSync(destPath)
 
-    await assert.rejects(download(destPath), { code: 'EISDIR' })
+    await assert.rejects(download(destPath), /rename/)
+    assert.ok(fs.statSync(destPath).isDirectory(), 'the directory is left alone')
+    assert.deepEqual(fs.readdirSync(path.dirname(destPath)), [path.basename(destPath)])
   })
 
   test('refuses a tarball that does not match its checksum', async () => {
