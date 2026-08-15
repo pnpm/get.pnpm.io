@@ -22,7 +22,7 @@ const KEYS: SigningKey[] = [{
 }]
 
 /** One thing broken per run, to drive each refusal separately. */
-type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'unsigned' | 'wrong-keyid' | 'no-integrity'
+type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'unsigned' | 'wrong-keyid' | 'no-integrity' | 'npm-tarball-url'
 
 let tmpDir: string
 let server: http.Server
@@ -66,7 +66,11 @@ describe('installPnpm', { skip: process.platform === 'win32' }, () => {
         const signed = mode === 'bad-signature' ? `sha512-${'A'.repeat(86)}==` : integrity
         json({
           dist: {
-            tarball: `${registry}${kind}.tgz`,
+            // An npm URL is what a registry proxying npm hands back, and has
+            // to be re-hosted onto the registry that answered.
+            tarball: mode === 'npm-tarball-url'
+              ? `https://registry.npmjs.org/${kind}.tgz`
+              : `${registry}${kind}.tgz`,
             ...(mode === 'no-integrity' ? {} : { integrity }),
             signatures: mode === 'unsigned'
               ? []
@@ -119,6 +123,15 @@ describe('installPnpm', { skip: process.platform === 'win32' }, () => {
     // manifest either — the fixture is a v12-shaped release, whose `dist/` is
     // self-contained.
     assert.deepEqual(fs.readdirSync(dest).sort(), ['dist', 'pnpm'])
+  })
+
+  test('downloads from the registry that served the metadata, not from npm', async () => {
+    mode = 'npm-tarball-url'
+    const dest = path.join(tmpDir, 'rehosted')
+
+    const { binPath } = await downloadPnpm({ versionSpec: 'latest', registry, dest, keys: KEYS })
+
+    assert.equal(fs.readFileSync(binPath, 'utf8').startsWith('#!/bin/sh'), true)
   })
 
   test('leaves no temporary directory behind', async () => {

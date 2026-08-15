@@ -32,7 +32,7 @@ and its checksum, so a checksum taken from it proves nothing on its own; npm als
 signs `<name>@<version>:<integrity>` with a key that this package pins, and a
 download that fails either check is refused rather than installed.
 
-The download goes to the registry npm is configured with (`npm_config_registry`), not to GitHub. Registries that require authentication are not supported yet.
+The download goes to the registry npm is configured with (`npm_config_registry`), not to GitHub — including the tarball itself, so a registry that proxies npm and hands back an npmjs.org URL does not send the download off the mirror. The command does not support registries that require authentication; `downloadPnpmExecutable` takes request headers for one.
 
 ## Environment variables
 
@@ -58,6 +58,29 @@ const { version, binPath } = await downloadPnpm({
   dest: '/opt/pnpm',
 })
 ```
+
+A caller that already knows the exact version, and already has everything else
+pnpm ships with, wants `downloadPnpmExecutable`: it places the executable at a
+path you name and touches nothing else. No dist-tags are resolved, so no
+packument is fetched, and the `dist/` tree that travels beside the executable is
+left to the caller. Corepack is the case it exists for — it unpacks the `pnpm`
+package itself but installs none of its dependencies, so the executable has to
+arrive separately.
+
+```js
+import { downloadPnpmExecutable } from 'get-pnpm'
+
+await downloadPnpmExecutable({
+  version: '12.0.0',
+  registry: 'https://registry.npmjs.org/',
+  destPath: '/opt/pnpm/pnpm',
+  headers: { authorization: 'Bearer …' }, // optional; never sent off the registry
+})
+```
+
+It verifies exactly what the other two do, and reads the archive in-process
+rather than shelling out to `tar`, so it works where no `tar` is on the PATH.
+Placement is atomic and tolerates losing a race with a concurrent call.
 
 ## Development
 

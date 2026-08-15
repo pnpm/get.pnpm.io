@@ -1,9 +1,13 @@
 import { createSign, generateKeyPairSync } from 'node:crypto'
 import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { after, before, describe, test } from 'node:test'
 
 import { platformPackageName, type Target } from '../lib/platformPackageName.js'
 import { resolveVersion } from '../lib/resolveVersion.js'
+import { sameFileContents } from '../lib/sameFileContents.js'
 import { type SigningKey, verifyRegistrySignature } from '../lib/verifySignature.js'
 
 describe('resolveVersion', () => {
@@ -134,5 +138,45 @@ describe('verifyRegistrySignature', () => {
     const expiring = [{ ...keys[0]!, expires: '2020-01-01T00:00:00.000Z' }]
     assert.throws(() => verifyRegistrySignature({ name, version, integrity, signatures, keys: expiring }), /expired on 2020-01-01/)
     verifyRegistrySignature({ name, version, integrity, signatures, keys: expiring, now: new Date('2019-01-01') })
+  })
+})
+
+describe('sameFileContents', () => {
+  let dir: string
+
+  before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'get-pnpm-same-')) })
+  after(() => { fs.rmSync(dir, { recursive: true, force: true }) })
+
+  const write = (name: string, content: string | Buffer): string => {
+    const file = path.join(dir, name)
+    fs.writeFileSync(file, content)
+    return file
+  }
+
+  test('accepts two files holding the same bytes', () => {
+    // Longer than one read, so the comparison has to loop.
+    const content = Buffer.alloc(200_000, 'pnpm')
+    assert.equal(sameFileContents(write('a', content), write('b', content)), true)
+  })
+
+  test('rejects files that differ only in their last byte', () => {
+    const content = Buffer.alloc(200_000, 'pnpm')
+    const altered = Buffer.from(content)
+    altered[altered.length - 1] = 0
+    assert.equal(sameFileContents(write('long', content), write('altered', altered)), false)
+  })
+
+  test('rejects a file of a different length', () => {
+    assert.equal(sameFileContents(write('short', 'pnpm'), write('shorter', 'pnp')), false)
+  })
+
+  test('rejects a destination that is missing, a directory, or a symlink', () => {
+    const file = write('subject', 'pnpm')
+    fs.mkdirSync(path.join(dir, 'as-directory'))
+    fs.symlinkSync(file, path.join(dir, 'as-symlink'))
+
+    assert.equal(sameFileContents(file, path.join(dir, 'absent')), false)
+    assert.equal(sameFileContents(file, path.join(dir, 'as-directory')), false)
+    assert.equal(sameFileContents(file, path.join(dir, 'as-symlink')), false)
   })
 })
