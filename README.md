@@ -89,12 +89,11 @@ other. The signature is what ties them to the pnpm release key.
 | Primary key | `4D20AD76D7BE567214F3F8EE4EABAE7510A044FA` |
 | Signing subkey | `432EDF21183B9FE186AA53247CBF6055273E6CB5` |
 
-The key is published on [keys.openpgp.org](https://keys.openpgp.org/search?q=4D20AD76D7BE567214F3F8EE4EABAE7510A044FA)
-and on [Keybase](https://keybase.io/pnpm/pgp_keys.asc). Both serve the same key, so either
-source works:
+The key is published on [keys.openpgp.org](https://keys.openpgp.org/search?q=4D20AD76D7BE567214F3F8EE4EABAE7510A044FA),
+which serves it by either fingerprint above:
 
 ```sh
-curl -fsSL https://keybase.io/pnpm/pgp_keys.asc | gpg --import
+curl -fsSL https://keys.openpgp.org/vks/v1/by-fingerprint/4D20AD76D7BE567214F3F8EE4EABAE7510A044FA | gpg --import
 ```
 
 `SHASUMS256.txt` lists the installer scripts served from this site — `install.sh`,
