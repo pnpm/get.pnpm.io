@@ -54,16 +54,13 @@ dist_tag_version() {
   dist_tags "$1" | grep "^$2:" | head -n 1 | sed "s/^$2://"
 }
 
-# Turn what PNPM_VERSION asks for into a concrete version, left in
-# RESOLVED_VERSION.
-#
-# The argument is a dist-tag (`latest`, `next-12`), an exact version (`11.20.0`,
-# with an optional leading `v`), or a bare major (`12`, `v12`) — the same rule
-# `resolveVersion` applies in the `get-pnpm` package.
+# Turn what PNPM_VERSION asks for — a dist-tag, a version, or a bare major — into
+# a concrete version, left in RESOLVED_VERSION. `resolveVersion` in the
+# `get-pnpm` package resolves the same three the same way.
 #
 # The result comes back in a variable rather than on stdout because the aborts
-# below have to end the install: called from a command substitution they would
-# end only the subshell, and the message would be captured as the version.
+# here have to end the install: from a command substitution they would end only
+# the subshell, and their message would be captured as the version.
 resolve_version() {
   local spec kind version_json version
   spec="$1"

@@ -1,0 +1,31 @@
+name: Version resolution
+
+on:
+  - push
+  - pull_request
+
+permissions:
+  contents: read
+
+# The install workflows prove that a handful of specs install the major they
+# name, one full download at a time. This covers the rest of what PNPM_VERSION
+# accepts and refuses, against a fixed packument and no network at all.
+jobs:
+  resolve:
+    strategy:
+      matrix:
+        shell:
+          # `sh` is dash on the Ubuntu runners, so the two together cover the
+          # shells the resolution code is written for.
+          - sh
+          - bash
+      fail-fast: false
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Resolve every accepted and refused version
+        run: ${{ matrix.shell }} test/resolve-version.sh

@@ -278,11 +278,9 @@ if ($null -eq $version -and $preferredVersion -in $versions) {
   $version = $preferredVersion
 }
 
-# A bare major (12, v12) asks for that major's current release. pnpm publishes
-# it as `latest-<major>` once the major is stable, and only as `next-<major>`
-# before it is promoted — taking either is what makes a new major installable on
-# the day it lands rather than once someone promotes it. Same rule as install.sh
-# and the `get-pnpm` package.
+# A bare major (12, v12) asks for that major's current release, which pnpm
+# publishes as `latest-<major>` once the major is stable and only as
+# `next-<major>` until then. Same rule as install.sh and the `get-pnpm` package.
 if ($null -eq $version -and $preferredVersion -match '^v?(\d+)$') {
   $major = $Matches[1]
   foreach ($tag in "latest-$major", "next-$major") {
