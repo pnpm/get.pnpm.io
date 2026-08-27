@@ -54,6 +54,55 @@ dist_tag_version() {
   dist_tags "$1" | grep "^$2:" | head -n 1 | sed "s/^$2://"
 }
 
+# Turn what PNPM_VERSION asks for — a dist-tag, a version, or a bare major — into
+# a concrete version, left in RESOLVED_VERSION. `resolveVersion` in the
+# `get-pnpm` package resolves the same three the same way.
+#
+# The result comes back in a variable rather than on stdout because the aborts
+# here have to end the install: from a command substitution they would end only
+# the subshell, and their message would be captured as the version.
+resolve_version() {
+  local spec kind version_json version
+  spec="$1"
+  # A leading `v` is accepted on a version or a major, but not stripped from
+  # every spec: that would turn a dist-tag like `vnext` into a lookup for
+  # `next`.
+  case "$spec" in
+    v[0-9]*) spec="${spec#v}" ;;
+  esac
+
+  case "$spec" in
+    # Starts with a digit and carries something else: the version it says it
+    # is, with nothing to look up.
+    [0-9]*[!0-9]*) RESOLVED_VERSION="$spec"; return 0 ;;
+    # All digits: a bare major.
+    [0-9]*) kind='major' ;;
+    *) kind='tag' ;;
+  esac
+
+  # Tags come from `pnpm`: it is published for every release, whereas
+  # `@pnpm/exe` is on its way out and would go stale.
+  version_json="$(download "$NPM_REGISTRY/pnpm")" || abort "Download Error!"
+
+  if [ "$kind" = 'major' ]; then
+    # A bare major asks for that major's current release. pnpm publishes it as
+    # `latest-<major>` once the major is stable, and only as `next-<major>`
+    # before it is promoted — taking either is what makes a new major
+    # installable on the day it lands rather than once someone promotes it.
+    version="$(dist_tag_version "$version_json" "latest-$spec")"
+    [ -n "$version" ] || version="$(dist_tag_version "$version_json" "next-$spec")"
+  else
+    version="$(dist_tag_version "$version_json" "$spec")"
+  fi
+
+  [ -n "$version" ] || abort \
+    "Sorry! pnpm \"$1\" could not be found." \
+    "" \
+    "PNPM_VERSION takes a version, a major, or one of these tags:" \
+    "$(dist_tags "$version_json")"
+  RESOLVED_VERSION="$version"
+}
+
 # First "<name>":"<value>" pair in a JSON document. The fields read out of the
 # registry metadata below (tarball, integrity, sig, keyid) each occur once.
 json_string() {
@@ -261,34 +310,31 @@ detect_arch() {
 }
 
 download_and_install() {
-  local platform arch libc_suffix preferred_version version_json version tmp_dir major_version asset_base
+  local platform arch libc_suffix version tmp_dir major_version asset_base
   platform="$(detect_platform)"
   arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
   libc_suffix="$(detect_libc_suffix)"
-  # PNPM_VERSION takes a dist-tag or a version, as it does in install.ps1. A
-  # version is used as given; anything else is looked up in the dist-tags.
-  preferred_version="${PNPM_VERSION:-latest}"
-  case "$preferred_version" in
-    [0-9]*) version="$preferred_version" ;;
-    v[0-9]*) version="${preferred_version#v}" ;;
-    *)
-      # Tags come from `pnpm`: it is published for every release, whereas
-      # `@pnpm/exe` is on its way out and would go stale.
-      version_json="$(download "$NPM_REGISTRY/pnpm")" || abort "Download Error!"
-      version="$(dist_tag_version "$version_json" "$preferred_version")"
-      [ -n "$version" ] || abort \
-        "Sorry! pnpm \"$preferred_version\" could not be found." \
-        "" \
-        "PNPM_VERSION takes a version or one of these tags:" \
-        "$(dist_tags "$version_json")"
-      ;;
-  esac
+  # PNPM_VERSION takes a dist-tag, a version, or a major, as it does in
+  # install.ps1.
+  resolve_version "${PNPM_VERSION:-latest}"
+  version="$RESOLVED_VERSION"
 
   # Everything below builds URLs out of this value, so keep it to the shape of
-  # a version. Without this `PNPM_VERSION=12.0.0/../../@evil/pkg` passes the
-  # major-version test and changes which path is requested.
+  # a version. Every pnpm release is `major.minor.patch`, optionally with a
+  # prerelease part; a partial version like `12.0` is not a version the registry
+  # holds, and without this test it reaches it as one and comes back as a 404
+  # rather than as the mistake it is.
   case "$version" in
-    '' | *[!0-9A-Za-z.+-]*) abort "Invalid pnpm version: $version" ;;
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *) abort "Invalid pnpm version: $version" \
+      "" \
+      "PNPM_VERSION takes a full version (12.0.0), a major (12), or a dist-tag (next-12)." ;;
+  esac
+  # Checked separately, because the test above admits a path: without this
+  # `PNPM_VERSION=12.0.0/../../@evil/pkg` passes the major-version test too and
+  # changes which path is requested.
+  case "$version" in
+    *[!0-9A-Za-z.+-]*) abort "Invalid pnpm version: $version" ;;
   esac
 
   # Compute the major version once. Strip an optional leading "v" so
