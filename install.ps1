@@ -278,6 +278,20 @@ if ($null -eq $version -and $preferredVersion -in $versions) {
   $version = $preferredVersion
 }
 
+# A bare major (12, v12) asks for that major's current release. pnpm publishes
+# it as `latest-<major>` once the major is stable, and only as `next-<major>`
+# before it is promoted — taking either is what makes a new major installable on
+# the day it lands rather than once someone promotes it. Same rule as install.sh
+# and the `get-pnpm` package.
+if ($null -eq $version -and $preferredVersion -match '^v?(\d+)$') {
+  $major = $Matches[1]
+  foreach ($tag in "latest-$major", "next-$major") {
+    if ($null -eq $version -and $tag -in $distTags) {
+      $version = $versionJson.'dist-tags' | Select-Object -ExpandProperty $tag
+    }
+  }
+}
+
 if ($null -eq $version) {
   Write-Host "Current tags:" -ForegroundColor Yellow -NoNewline
   $versionJson.'dist-tags' | Format-List
@@ -285,7 +299,7 @@ if ($null -eq $version) {
   Write-Host "Versions:" -ForegroundColor Yellow -NoNewline
   $versionJson.versions | Get-Member -Type NoteProperty | Format-Wide -Property Name -AutoSize
 
-  Write-Error "Sorry! pnpm '$preferredVersion' version could not be found. Use one of the tags or published versions from the provided list"
+  Write-Error "Sorry! pnpm '$preferredVersion' version could not be found. Use a major, or one of the tags or published versions from the provided list"
 }
 
 $tempFileFolder = New-TemporaryDirectory

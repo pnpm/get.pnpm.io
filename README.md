@@ -138,8 +138,16 @@ curl -fsSL https://get.pnpm.io/install.sh | PNPM_VERSION=6.27.2 sh -
 $env:PNPM_VERSION='6.27.2' ; iwr https://get.pnpm.io/install.ps1 -useb | iex
 ```
 
+`PNPM_VERSION` also takes a bare major, which installs that major's current
+release — its `latest-<major>` dist-tag, or `next-<major>` for a major that has
+not been promoted to stable yet:
+
+```sh
+curl -fsSL https://get.pnpm.io/install.sh | PNPM_VERSION=12 sh -
+```
+
 All the supported environment variables that can influence pnpm's installation:
 
 | Env variable      | Type                  | Description                                                                              | Example                                           |
 | ----------------- | --------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| **PNPM_VERSION**  | _version or dist-tag_ | `latest` by default. The pnpm version to be installed, as a version or a dist-tag.<br>(not older than `pnpm@6.27.2`) | `PNPM_VERSION=6.31.0`<br>`PNPM_VERSION=next-12` |
+| **PNPM_VERSION**  | _version, major, or dist-tag_ | `latest` by default. The pnpm version to be installed, as a version, a major, or a dist-tag.<br>(not older than `pnpm@6.27.2`) | `PNPM_VERSION=6.31.0`<br>`PNPM_VERSION=12`<br>`PNPM_VERSION=next-12` |
