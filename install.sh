@@ -323,10 +323,21 @@ download_and_install() {
   version="$RESOLVED_VERSION"
 
   # Everything below builds URLs out of this value, so keep it to the shape of
-  # a version. Without this `PNPM_VERSION=12.0.0/../../@evil/pkg` passes the
-  # major-version test and changes which path is requested.
+  # a version. Every pnpm release is `major.minor.patch`, optionally with a
+  # prerelease part; a partial version like `12.0` is not a version the registry
+  # holds, and without this test it reaches it as one and comes back as a 404
+  # rather than as the mistake it is.
   case "$version" in
-    '' | *[!0-9A-Za-z.+-]*) abort "Invalid pnpm version: $version" ;;
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *) abort "Invalid pnpm version: $version" \
+      "" \
+      "PNPM_VERSION takes a full version (12.0.0), a major (12), or a dist-tag (next-12)." ;;
+  esac
+  # Checked separately, because the test above admits a path: without this
+  # `PNPM_VERSION=12.0.0/../../@evil/pkg` passes the major-version test too and
+  # changes which path is requested.
+  case "$version" in
+    *[!0-9A-Za-z.+-]*) abort "Invalid pnpm version: $version" ;;
   esac
 
   # Compute the major version once. Strip an optional leading "v" so

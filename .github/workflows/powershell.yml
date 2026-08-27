@@ -38,7 +38,22 @@ jobs:
         if: ${{ matrix.runs-on == 'windows-latest' }}
       - name: Verify pnpm works (Unix)
         if: ${{ matrix.runs-on == 'macos-latest' || matrix.runs-on == 'ubuntu-latest' }}
+        env:
+          PNPM_VERSION: ${{ matrix.pnpm_version }}
         run: |
+          # Prove the cell installed the major it selects. Without this a
+          # mis-wired PNPM_VERSION falls back to `latest`, and a cell that
+          # exists to exercise one code path passes while testing another.
+          case "$PNPM_VERSION" in
+            [0-9]*) expected_major="${PNPM_VERSION%%.*}" ;;
+            *) expected_major="${PNPM_VERSION##*-}" ;;
+          esac
+          export PATH="/tmp/pnpm-home/bin:/tmp/pnpm-home:$PATH"
+          installed="$(PNPM_HOME=/tmp/pnpm-home pnpm --version)"
+          if [ "${installed%%.*}" != "$expected_major" ]; then
+            echo "expected pnpm $expected_major.x, got $installed" >&2
+            exit 1
+          fi
           tmpdir=$(mktemp -d)
           cd "$tmpdir"
           echo '{}' > package.json
@@ -57,6 +72,15 @@ jobs:
           # Prepend both so the verify step works across every test matrix cell.
           $env:PATH = "$pnpmBin;$pnpmHome;$env:PATH"
           $env:PNPM_HOME = $pnpmHome
+          # Prove the cell installed the major it selects. Without this a
+          # mis-wired PNPM_VERSION falls back to `latest`, and a cell that
+          # exists to exercise one code path passes while testing another.
+          $spec = "${{ matrix.pnpm_version }}"
+          $expectedMajor = if ($spec -match '^\d') { ($spec -split '\.')[0] } else { ($spec -split '-')[-1] }
+          $installed = (pnpm --version).Trim()
+          if (($installed -split '\.')[0] -ne $expectedMajor) {
+            throw "expected pnpm $expectedMajor.x, got $installed"
+          }
           $tmpdir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
           New-Item -ItemType Directory -Path $tmpdir | Out-Null
           Set-Location $tmpdir
