@@ -5,14 +5,14 @@ import path from 'node:path'
 
 import { extractTarball } from './extractTarball.js'
 import { isMusl, platformPackageName } from './platformPackageName.js'
-import { downloadTarball, fetchPackument, fetchVersionMeta, registryFromEnv } from './registry.js'
+import { downloadTarball, fetchPackument, fetchVersionMeta, registryFromEnv, useProxyFromEnv } from './registry.js'
 import { majorVersion, resolveVersion } from './resolveVersion.js'
 import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
 
 export { type DownloadExecutableOptions, downloadPnpmExecutable } from './downloadExecutable.js'
 export { extractTarballMember } from './extractTarballMember.js'
 export { isMusl, platformPackageName, type Target } from './platformPackageName.js'
-export { DEFAULT_REGISTRY, registryFromEnv, type RequestHeaders } from './registry.js'
+export { DEFAULT_REGISTRY, registryFromEnv, type RequestHeaders, useProxyFromEnv } from './registry.js'
 export { type Packument, majorVersion, resolveVersion } from './resolveVersion.js'
 export { type PackageSignature, type SigningKey, verifyRegistrySignature } from './verifySignature.js'
 
@@ -43,6 +43,8 @@ Environment variables:
   PNPM_VERSION           Version to install when no argument is given.
   PNPM_HOME              Directory to install pnpm into.
   npm_config_registry    Registry to download pnpm from.
+  HTTPS_PROXY            Proxy to download through; NO_PROXY names hosts to
+                         reach directly. Node 24.14 or later.
 `
 
 export async function runCli (argv: string[]): Promise<number> {
@@ -126,6 +128,22 @@ export async function installPnpm (
  * @returns the version installed and the path to the executable.
  */
 export async function downloadPnpm (
+  opts: {
+    versionSpec: string
+    registry: string
+    dest: string
+    keys?: readonly SigningKey[]
+  }
+): Promise<{ version: string, binPath: string }> {
+  const restoreProxy = useProxyFromEnv()
+  try {
+    return await fetchPnpm(opts)
+  } finally {
+    restoreProxy()
+  }
+}
+
+async function fetchPnpm (
   opts: {
     versionSpec: string
     registry: string
