@@ -58,13 +58,26 @@ type ProxyCapableHttp = typeof http & {
  *
  * Node before 24.14 has no way to apply the proxy after startup, so the
  * request goes direct there, as it always has.
+ *
+ * The setting is process-global, so overlapping downloads share one
+ * activation: the first call applies the proxy and the last of the returned
+ * functions to run puts the agents back, never one in the middle.
  */
 export function useProxyFromEnv (): () => void {
   if (!PROXY_VARS.some((name) => process.env[name])) return () => {}
   const { setGlobalProxyFromEnv } = http as ProxyCapableHttp
   if (setGlobalProxyFromEnv == null) return () => {}
-  return setGlobalProxyFromEnv(process.env)
+  if (proxyUsers++ === 0) restoreProxy = setGlobalProxyFromEnv(process.env)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    if (--proxyUsers === 0) restoreProxy()
+  }
 }
+
+let proxyUsers = 0
+let restoreProxy: () => void = () => {}
 
 // Node's fetch applies no timeout of its own: a registry that accepts the
 // connection and then stalls would hang the install with no output. Metadata is

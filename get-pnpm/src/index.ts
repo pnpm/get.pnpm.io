@@ -43,8 +43,9 @@ Environment variables:
   PNPM_VERSION           Version to install when no argument is given.
   PNPM_HOME              Directory to install pnpm into.
   npm_config_registry    Registry to download pnpm from.
-  HTTPS_PROXY            Proxy to download through; NO_PROXY names hosts to
-                         reach directly. Node 24.14 or later.
+  HTTPS_PROXY            Proxy to download through (HTTP_PROXY for an http://
+                         registry); NO_PROXY names hosts to reach directly.
+                         Node 24.14 or later.
 `
 
 export async function runCli (argv: string[]): Promise<number> {

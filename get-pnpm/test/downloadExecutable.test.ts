@@ -201,6 +201,21 @@ describe('downloadPnpmExecutable', () => {
     assert.deepEqual(proxyRequests, [], 'a request after the download went direct')
   })
 
+  test('keeps the proxy until the last of two overlapping downloads is done', { skip: PROXY_UNSUPPORTED }, async () => {
+    // Every request the first download makes goes through the proxy even after
+    // the second finishes; the direct route comes back only once both are done.
+    let proxied = 0
+    await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
+      await Promise.all([download(destIn('overlap-a')), download(destIn('overlap-b'))])
+      proxied = proxyRequests.length
+      proxyRequests = []
+      await fetch(`${registry}${packageNameFor()}/${VERSION}`)
+    })
+
+    assert.equal(proxied, 4, 'both metadata requests and both downloads went through the proxy')
+    assert.deepEqual(proxyRequests, [], 'a request after both downloads went direct')
+  })
+
   test('re-hosts an npm tarball URL onto the registry that served the metadata', async () => {
     mode = 'npm-tarball-url'
     const destPath = destIn('rehosted')
