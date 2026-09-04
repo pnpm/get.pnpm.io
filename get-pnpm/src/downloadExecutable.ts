@@ -4,7 +4,7 @@ import path from 'node:path'
 
 import { extractTarballMember } from './extractTarballMember.js'
 import { isMusl, platformPackageName } from './platformPackageName.js'
-import { downloadTarball, fetchVersionMeta, normalizeRegistry, type RequestHeaders } from './registry.js'
+import { downloadTarball, fetchVersionMeta, normalizeRegistry, type RequestHeaders, useProxyFromEnv } from './registry.js'
 import { majorVersion } from './resolveVersion.js'
 import { sameFileContents } from './sameFileContents.js'
 import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
@@ -55,15 +55,26 @@ export interface DownloadExecutableOptions {
  * @returns the package the executable came from.
  */
 export async function downloadPnpmExecutable (opts: DownloadExecutableOptions): Promise<{ packageName: string }> {
-  const { version, destPath } = opts
   const registry = normalizeRegistry(opts.registry)
   const packageName = platformPackageName({
-    major: majorVersion(version),
+    major: majorVersion(opts.version),
     platform: process.platform,
     arch: process.arch,
     musl: isMusl(),
   })
 
+  const restoreProxy = useProxyFromEnv()
+  try {
+    return await fetchExecutable({ ...opts, registry, packageName })
+  } finally {
+    restoreProxy()
+  }
+}
+
+async function fetchExecutable (
+  opts: DownloadExecutableOptions & { packageName: string }
+): Promise<{ packageName: string }> {
+  const { version, destPath, registry, packageName } = opts
   const meta = await fetchVersionMeta(registry, packageName, version, opts.headers)
   if (!meta.dist.integrity) {
     throw new Error(`The npm registry published no checksum for ${packageName}@${version}, so it cannot be verified.`)

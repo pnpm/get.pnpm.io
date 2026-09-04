@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
+import http from 'node:http'
 import { pipeline } from 'node:stream/promises'
 
 import type { Packument } from './resolveVersion.js'
@@ -34,6 +35,52 @@ export function registryFromEnv (): string {
 export function normalizeRegistry (registry: string): string {
   return registry.endsWith('/') ? registry : `${registry}/`
 }
+
+const PROXY_VARS = ['https_proxy', 'HTTPS_PROXY', 'http_proxy', 'HTTP_PROXY'] as const
+
+// `http.setGlobalProxyFromEnv` arrived in Node 24.14; the types this package
+// builds against predate it.
+type ProxyCapableHttp = typeof http & {
+  setGlobalProxyFromEnv?: (proxyEnv?: NodeJS.ProcessEnv) => () => void
+}
+
+/**
+ * Routes every request made until the returned function is called through the
+ * proxy the environment names in `HTTPS_PROXY`/`HTTP_PROXY`, honouring
+ * `NO_PROXY`. A no-op when the environment names none.
+ *
+ * `fetch` reads those variables only when Node was started with
+ * `NODE_USE_ENV_PROXY=1`, which nothing that embeds this package controls:
+ * Corepack starts the process that runs pnpm's launcher. On a network that
+ * allows no other route out, the download then fails with a bare
+ * `fetch failed`, while everything before it went through the proxy fine,
+ * Corepack's own download of the `pnpm` package included.
+ *
+ * Node before 24.14 has no way to apply the proxy after startup, so the
+ * request goes direct there, as it always has.
+ *
+ * The setting is process-global, so overlapping downloads share one
+ * activation: the first call applies the proxy and the last of the returned
+ * functions to run puts the agents back, never one in the middle.
+ */
+export function useProxyFromEnv (): () => void {
+  if (!PROXY_VARS.some((name) => process.env[name])) return () => {}
+  const { setGlobalProxyFromEnv } = http as ProxyCapableHttp
+  if (setGlobalProxyFromEnv == null) return () => {}
+  // Counted only once the activation took: a call that threw on a malformed
+  // proxy URL holds nothing to release, and a retry after a fix has to activate.
+  if (proxyUsers === 0) restoreProxy = setGlobalProxyFromEnv(process.env)
+  proxyUsers++
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    if (--proxyUsers === 0) restoreProxy()
+  }
+}
+
+let proxyUsers = 0
+let restoreProxy: () => void = () => {}
 
 // Node's fetch applies no timeout of its own: a registry that accepts the
 // connection and then stalls would hang the install with no output. Metadata is
