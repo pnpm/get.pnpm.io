@@ -216,6 +216,20 @@ describe('downloadPnpmExecutable', () => {
     assert.deepEqual(proxyRequests, [], 'a request after both downloads went direct')
   })
 
+  test('activates the proxy on a retry after a malformed proxy URL was rejected', { skip: PROXY_UNSUPPORTED }, async () => {
+    await withEnv({ HTTP_PROXY: 'not a url', NO_PROXY: undefined }, async () => {
+      await assert.rejects(download(destIn('malformed')))
+    })
+    const destPath = destIn('retried')
+
+    await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
+      await download(destPath)
+    })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.equal(proxyRequests.length, 2, 'the retry went through the proxy')
+  })
+
   test('re-hosts an npm tarball URL onto the registry that served the metadata', async () => {
     mode = 'npm-tarball-url'
     const destPath = destIn('rehosted')

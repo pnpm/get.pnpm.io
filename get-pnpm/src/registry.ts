@@ -67,7 +67,10 @@ export function useProxyFromEnv (): () => void {
   if (!PROXY_VARS.some((name) => process.env[name])) return () => {}
   const { setGlobalProxyFromEnv } = http as ProxyCapableHttp
   if (setGlobalProxyFromEnv == null) return () => {}
-  if (proxyUsers++ === 0) restoreProxy = setGlobalProxyFromEnv(process.env)
+  // Counted only once the activation took: a call that threw on a malformed
+  // proxy URL holds nothing to release, and a retry after a fix has to activate.
+  if (proxyUsers === 0) restoreProxy = setGlobalProxyFromEnv(process.env)
+  proxyUsers++
   let released = false
   return () => {
     if (released) return
