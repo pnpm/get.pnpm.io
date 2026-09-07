@@ -27,10 +27,24 @@ fail() {
 
 # `uname -m` of "$1" maps to arch "$2".
 expect_arch() {
+  # Called by the sourced installer, not from here, which shellcheck cannot see.
+  # shellcheck disable=SC2329
   uname() { if [ "${1:-}" = '-m' ]; then printf '%s' "$machine"; else printf 'Linux'; fi; }
   machine="$1"
   actual="$(detect_arch || printf 'REFUSED')"
   [ "$actual" = "$2" ] || fail "uname -m=$1" "$2" "$actual"
+}
+
+# `uname -s` of Linux with the Android loader "$1" present detects as "$2".
+expect_platform_on_linux() {
+  # Both are called by the sourced installer, as above.
+  # shellcheck disable=SC2329
+  uname() { printf 'Linux'; }
+  # shellcheck disable=SC2329
+  is_android() { [ "$android" = 'yes' ]; }
+  android="$1"
+  actual="$(detect_platform)"
+  [ "$actual" = "$2" ] || fail "linux, android=$1" "$2" "$actual"
 }
 
 # pnpm major "$3" on "$1"-"$2" is installable.
@@ -61,6 +75,11 @@ expect_arch ppc64 REFUSED
 expect_arch i686 REFUSED
 expect_arch mips REFUSED
 
+# Android reports itself as Linux and has to be told apart, or it picks the
+# musl asset, whose DNS resolution cannot work there.
+expect_platform_on_linux yes android
+expect_platform_on_linux no linux
+
 # The x64/arm64 matrix predates v12 and is not gated.
 expect_built linux x64 11
 expect_built darwin arm64 10
@@ -75,6 +94,9 @@ expect_not_built freebsd x64 11 'pnpm 12 does'
 expect_not_built linux ppc64 11 'linux-ppc64'
 expect_not_built linux riscv64 11 'linux-riscv64'
 expect_not_built linux s390x 10 'linux-s390x'
+expect_built android arm64 12
+expect_built android x64 12
+expect_not_built android arm64 11 'android-arm64'
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures case(s) failed"

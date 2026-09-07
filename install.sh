@@ -214,12 +214,21 @@ is_glibc_compatible() {
 # and release assets use from v11.0.0-rc.3 onward. See `legacy_asset_basename`
 # below for the older `macos` / `win` / `linuxstatic` mapping used by earlier
 # releases.
+# Android reports itself as Linux, so `uname` alone cannot tell the two apart,
+# and the wrong answer picks an asset that cannot run: the musl Linux binary
+# resolves DNS through `/etc/resolv.conf`, which Android does not have. Only
+# 64-bit Android is built for, and this is the loader those binaries name as
+# their interpreter, so its absence means no asset would run here anyway.
+is_android() {
+  [ -e /system/bin/linker64 ]
+}
+
 detect_platform() {
   local platform
   platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
   case "${platform}" in
-    linux)  platform="linux" ;;
+    linux)  if is_android; then platform="android"; else platform="linux"; fi ;;
     darwin) platform="darwin" ;;
     mingw*|msys*|cygwin*) platform="win32" ;;
     windows*) platform="win32" ;;
@@ -329,6 +338,7 @@ assert_target_is_built() {
   major="$3"
 
   case "${platform}-${arch}" in
+    android-arm64 | android-x64) ;;
     freebsd-x64 | linux-ppc64 | linux-riscv64 | linux-s390x) ;;
     *) return 0 ;;
   esac

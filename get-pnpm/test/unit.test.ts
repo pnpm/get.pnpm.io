@@ -62,6 +62,8 @@ describe('platformPackageName', () => {
     assert.equal(platformPackageName(target({ major: 12, arch: 'ppc64' })), '@pnpm/exe.linux-ppc64')
     assert.equal(platformPackageName(target({ major: 12, arch: 'riscv64' })), '@pnpm/exe.linux-riscv64')
     assert.equal(platformPackageName(target({ major: 12, arch: 's390x' })), '@pnpm/exe.linux-s390x')
+    assert.equal(platformPackageName(target({ major: 12, platform: 'android', arch: 'arm64' })), '@pnpm/exe.android-arm64')
+    assert.equal(platformPackageName(target({ major: 12, platform: 'android' })), '@pnpm/exe.android-x64')
   })
 
   test('those hosts have no binary before v12, and are pointed at it', () => {
@@ -69,8 +71,11 @@ describe('platformPackageName', () => {
     assert.throws(() => platformPackageName(target({ arch: 's390x' })), /npx get-pnpm 12/s)
   })
 
-  test('a musl suffix is never added to them, since only glibc builds ship', () => {
+  test('a musl suffix is never added to them', () => {
     assert.equal(platformPackageName(target({ major: 12, arch: 'ppc64', musl: true })), '@pnpm/exe.linux-ppc64')
+    // Android is bionic. `isMusl()` only ever reports true on Linux, but the
+    // name must not carry a libc either way.
+    assert.equal(platformPackageName(target({ major: 12, platform: 'android', musl: true })), '@pnpm/exe.android-x64')
   })
 
   test('rejects hosts pnpm publishes no binary for', () => {

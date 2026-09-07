@@ -15,6 +15,8 @@ export interface Target {
  * JavaScript CLI, which runs on these hosts through npm but has no binary.
  */
 const V12_ONLY_TARGETS = new Set([
+  'android-arm64',
+  'android-x64',
   'freebsd-x64',
   'linux-ppc64',
   'linux-riscv64',
