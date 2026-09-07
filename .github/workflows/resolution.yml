@@ -29,3 +29,5 @@ jobs:
           persist-credentials: false
       - name: Resolve every accepted and refused version
         run: ${{ matrix.shell }} test/resolve-version.sh
+      - name: Detect every built and refused target
+        run: ${{ matrix.shell }} test/target.sh

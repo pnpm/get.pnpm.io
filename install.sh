@@ -288,10 +288,18 @@ detect_arch() {
   local arch
   arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
 
+  # Node's `process.arch` names, which the release assets are named after.
+  # Both POWER endiannesses are `ppc64` there, and only the little-endian
+  # build is released; `assert_target_is_built` rejects the other one.
   case "${arch}" in
     x86_64 | amd64) arch="x64" ;;
     armv*) arch="arm" ;;
     arm64 | aarch64) arch="arm64" ;;
+    ppc64le) arch="ppc64" ;;
+    # Big-endian POWER, which reports itself as plain `ppc64`. Node names both
+    # endiannesses `ppc64` and only the little-endian build is released, so
+    # this host has no asset even though the mapped name would match one.
+    ppc64) return 1 ;;
   esac
 
   # `uname -m` in some cases mis-reports 32-bit OS as 64-bit, so double check
@@ -304,15 +312,39 @@ detect_arch() {
   case "$arch" in
     x64*) ;;
     arm64*) ;;
+    ppc64 | riscv64 | s390x) ;;
     *) return 1
   esac
   printf '%s' "${arch}"
 }
 
+# pnpm 12 is the first release built for anything outside the x64/arm64 matrix
+# on darwin, linux and win32. Older majors are a JavaScript CLI, which runs on
+# these hosts through npm but has no release asset, so without this the script
+# would 404 and surface as a generic "Install Error!".
+assert_target_is_built() {
+  local platform arch major
+  platform="$1"
+  arch="$2"
+  major="$3"
+
+  case "${platform}-${arch}" in
+    freebsd-x64 | linux-ppc64 | linux-riscv64 | linux-s390x) ;;
+    *) return 0 ;;
+  esac
+  if [ "$major" -lt 12 ]; then
+    abort \
+      "pnpm v${major} does not provide a pre-built binary for ${platform}-${arch}." \
+      "" \
+      "pnpm 12 does. Install it with:" \
+      "  PNPM_VERSION=12 sh -c \"\$(curl -fsSL https://get.pnpm.io/install.sh)\""
+  fi
+}
+
 download_and_install() {
   local platform arch libc_suffix version tmp_dir major_version asset_base
   platform="$(detect_platform)"
-  arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
+  arch="$(detect_arch)" || abort "Sorry! pnpm does not provide a pre-built binary for this architecture."
   libc_suffix="$(detect_libc_suffix)"
   # PNPM_VERSION takes a dist-tag, a version, or a major, as it does in
   # install.ps1.
@@ -350,6 +382,8 @@ download_and_install() {
   case "$major_version" in
     '' | *[!0-9]*) abort "Invalid pnpm version: $version" ;;
   esac
+
+  assert_target_is_built "$platform" "$arch" "$major_version"
 
   # Intel macOS isn't supported on pnpm v11 only: the SEA binary produced
   # by Node.js for darwin-x64 segfaults at startup because of an upstream
