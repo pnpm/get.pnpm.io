@@ -9,11 +9,6 @@ export interface Target {
   musl: boolean
 }
 
-/**
- * Hosts pnpm builds for from v12 onward, beyond the x64/arm64 matrix on
- * darwin, linux and win32 that every release ships. pnpm 11 and older are a
- * JavaScript CLI, which runs on these hosts through npm but has no binary.
- */
 const V12_ONLY_TARGETS = new Set([
   'android-arm64',
   'android-x64',

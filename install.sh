@@ -237,12 +237,14 @@ detect_platform() {
   printf '%s' "${platform}"
 }
 
-# Empty unless the target needs a libc suffix (currently only `-musl` on
-# non-glibc Linux).
 detect_libc_suffix() {
-  if [ "$(detect_platform)" = 'linux' ] && ! is_glibc_compatible; then
-    printf -- '-musl'
-  fi
+  case "$1-$2" in
+    linux-x64 | linux-arm64)
+      if ! is_glibc_compatible; then
+        printf -- '-musl'
+      fi
+      ;;
+  esac
 }
 
 # The asset renaming shipped in pnpm v11.0.0-rc.3. Anything older than that
@@ -297,17 +299,12 @@ detect_arch() {
   local arch
   arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
 
-  # Node's `process.arch` names, which the release assets are named after.
-  # Both POWER endiannesses are `ppc64` there, and only the little-endian
-  # build is released; `assert_target_is_built` rejects the other one.
   case "${arch}" in
     x86_64 | amd64) arch="x64" ;;
     armv*) arch="arm" ;;
     arm64 | aarch64) arch="arm64" ;;
     ppc64le) arch="ppc64" ;;
-    # Big-endian POWER, which reports itself as plain `ppc64`. Node names both
-    # endiannesses `ppc64` and only the little-endian build is released, so
-    # this host has no asset even though the mapped name would match one.
+    # Node names both POWER endiannesses ppc64; only little-endian is built.
     ppc64) return 1 ;;
   esac
 
@@ -327,10 +324,6 @@ detect_arch() {
   printf '%s' "${arch}"
 }
 
-# pnpm 12 is the first release built for anything outside the x64/arm64 matrix
-# on darwin, linux and win32. Older majors are a JavaScript CLI, which runs on
-# these hosts through npm but has no release asset, so without this the script
-# would 404 and surface as a generic "Install Error!".
 assert_target_is_built() {
   local platform arch major
   platform="$1"
@@ -340,7 +333,8 @@ assert_target_is_built() {
   case "${platform}-${arch}" in
     android-arm64 | android-x64) ;;
     freebsd-x64 | linux-ppc64 | linux-riscv64 | linux-s390x) ;;
-    *) return 0 ;;
+    darwin-x64 | darwin-arm64 | linux-x64 | linux-arm64 | win32-x64 | win32-arm64) return 0 ;;
+    *) abort "Sorry! pnpm does not provide a pre-built binary for ${platform}-${arch}." ;;
   esac
   if [ "$major" -lt 12 ]; then
     abort \
@@ -355,7 +349,7 @@ download_and_install() {
   local platform arch libc_suffix version tmp_dir major_version asset_base
   platform="$(detect_platform)"
   arch="$(detect_arch)" || abort "Sorry! pnpm does not provide a pre-built binary for this architecture."
-  libc_suffix="$(detect_libc_suffix)"
+  libc_suffix="$(detect_libc_suffix "$platform" "$arch")"
   # PNPM_VERSION takes a dist-tag, a version, or a major, as it does in
   # install.ps1.
   resolve_version "${PNPM_VERSION:-latest}"

@@ -1,9 +1,4 @@
 #!/bin/sh
-# Asserts which hosts the installer builds a target for, and which it refuses.
-#
-# The installer is sourced with its last line — the call that performs an
-# install — removed, so `detect_arch` and `assert_target_is_built` are exercised
-# as shipped. `uname` is replaced per case; nothing here reaches the network.
 set -eu
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -11,7 +6,7 @@ root="$(dirname "$here")"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 
-sed '$d' "$root/install.sh" > "$work/installer.sh"
+sed '/^download_and_install || abort "Install Error!"$/d' "$root/install.sh" > "$work/installer.sh"
 
 # shellcheck source=/dev/null
 . "$work/installer.sh"
@@ -25,7 +20,6 @@ fail() {
   echo "  actual:   $3"
 }
 
-# `uname -m` of "$1" maps to arch "$2".
 expect_arch() {
   # Called by the sourced installer, not from here, which shellcheck cannot see.
   # shellcheck disable=SC2329
@@ -35,7 +29,6 @@ expect_arch() {
   [ "$actual" = "$2" ] || fail "uname -m=$1" "$2" "$actual"
 }
 
-# `uname -s` of Linux with the Android loader "$1" present detects as "$2".
 expect_platform_on_linux() {
   # Both are called by the sourced installer, as above.
   # shellcheck disable=SC2329
@@ -47,13 +40,11 @@ expect_platform_on_linux() {
   [ "$actual" = "$2" ] || fail "linux, android=$1" "$2" "$actual"
 }
 
-# pnpm major "$3" on "$1"-"$2" is installable.
 expect_built() {
   actual="$( (assert_target_is_built "$1" "$2" "$3" && printf 'OK') 2>&1 || true )"
   [ "$actual" = 'OK' ] || fail "$1-$2 on v$3" 'OK' "$actual"
 }
 
-# pnpm major "$3" on "$1"-"$2" is refused, naming "$4".
 expect_not_built() {
   actual="$( (assert_target_is_built "$1" "$2" "$3" && printf 'OK') 2>&1 || true )"
   case "$actual" in
@@ -62,30 +53,46 @@ expect_not_built() {
   esac
 }
 
-# The architectures pnpm 12 is built for, under the names its assets carry.
+expect_package() {
+  actual="$(
+    # shellcheck disable=SC2329
+    detect_platform() { printf '%s' "$mock_platform"; }
+    # shellcheck disable=SC2329
+    detect_arch() { printf '%s' "$mock_arch"; }
+    # shellcheck disable=SC2329
+    is_glibc_compatible() { [ "$libc" = 'glibc' ]; }
+    # shellcheck disable=SC2329
+    ohai() { :; }
+    # Stop before downloading or executing anything.
+    # shellcheck disable=SC2329
+    fetch_verified_package() { printf '%s' "$1"; exit 0; }
+    mock_platform="$1"
+    mock_arch="$2"
+    libc="$3"
+    PNPM_VERSION=12.0.0 download_and_install
+  )"
+  [ "$actual" = "$4" ] || fail "$1-$2 on $3" "$4" "$actual"
+}
+
 expect_arch x86_64 x64
 expect_arch aarch64 arm64
 expect_arch riscv64 riscv64
 expect_arch s390x s390x
-# Node calls both POWER endiannesses `ppc64`, and only the little-endian build
-# is released, so only that `uname -m` maps to a target.
 expect_arch ppc64le ppc64
 expect_arch ppc64 REFUSED
-# Architectures pnpm has never shipped a binary for.
 expect_arch i686 REFUSED
 expect_arch mips REFUSED
 
-# Android reports itself as Linux and has to be told apart, or it picks the
-# musl asset, whose DNS resolution cannot work there.
 expect_platform_on_linux yes android
 expect_platform_on_linux no linux
 
-# The x64/arm64 matrix predates v12 and is not gated.
+expect_built linux arm64 11
+expect_built darwin x64 10
+expect_built win32 arm64 11
 expect_built linux x64 11
 expect_built darwin arm64 10
 expect_built win32 x64 11
 
-# Everything else arrived with the Rust port in v12.
 expect_built freebsd x64 12
 expect_built linux ppc64 12
 expect_built linux riscv64 12
@@ -97,6 +104,27 @@ expect_not_built linux s390x 10 'linux-s390x'
 expect_built android arm64 12
 expect_built android x64 12
 expect_not_built android arm64 11 'android-arm64'
+
+for major in 10 11 12; do
+  expect_not_built freebsd riscv64 "$major" 'does not provide a pre-built binary for freebsd-riscv64'
+  expect_not_built freebsd arm64 "$major" 'does not provide a pre-built binary for freebsd-arm64'
+  expect_not_built darwin ppc64 "$major" 'does not provide a pre-built binary for darwin-ppc64'
+  expect_not_built win32 s390x "$major" 'does not provide a pre-built binary for win32-s390x'
+  expect_not_built android riscv64 "$major" 'does not provide a pre-built binary for android-riscv64'
+  expect_not_built openbsd x64 "$major" 'does not provide a pre-built binary for openbsd-x64'
+done
+
+for libc in glibc musl; do
+  for arch in ppc64 riscv64 s390x; do
+    expect_package linux "$arch" "$libc" "@pnpm/exe.linux-$arch"
+  done
+  expect_package freebsd x64 "$libc" '@pnpm/exe.freebsd-x64'
+  expect_package android arm64 "$libc" '@pnpm/exe.android-arm64'
+done
+for arch in x64 arm64; do
+  expect_package linux "$arch" glibc "@pnpm/exe.linux-$arch"
+  expect_package linux "$arch" musl "@pnpm/exe.linux-$arch-musl"
+done
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures case(s) failed"
