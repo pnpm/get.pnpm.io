@@ -214,12 +214,21 @@ is_glibc_compatible() {
 # and release assets use from v11.0.0-rc.3 onward. See `legacy_asset_basename`
 # below for the older `macos` / `win` / `linuxstatic` mapping used by earlier
 # releases.
+# Android reports itself as Linux, so `uname` alone cannot tell the two apart,
+# and the wrong answer picks an asset that cannot run: the musl Linux binary
+# resolves DNS through `/etc/resolv.conf`, which Android does not have. Only
+# 64-bit Android is built for, and this is the loader those binaries name as
+# their interpreter, so its absence means no asset would run here anyway.
+is_android() {
+  [ -e /system/bin/linker64 ]
+}
+
 detect_platform() {
   local platform
   platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
   case "${platform}" in
-    linux)  platform="linux" ;;
+    linux)  if is_android; then platform="android"; else platform="linux"; fi ;;
     darwin) platform="darwin" ;;
     mingw*|msys*|cygwin*) platform="win32" ;;
     windows*) platform="win32" ;;
@@ -228,12 +237,14 @@ detect_platform() {
   printf '%s' "${platform}"
 }
 
-# Empty unless the target needs a libc suffix (currently only `-musl` on
-# non-glibc Linux).
 detect_libc_suffix() {
-  if [ "$(detect_platform)" = 'linux' ] && ! is_glibc_compatible; then
-    printf -- '-musl'
-  fi
+  case "$1-$2" in
+    linux-x64 | linux-arm64)
+      if ! is_glibc_compatible; then
+        printf -- '-musl'
+      fi
+      ;;
+  esac
 }
 
 # The asset renaming shipped in pnpm v11.0.0-rc.3. Anything older than that
@@ -292,6 +303,9 @@ detect_arch() {
     x86_64 | amd64) arch="x64" ;;
     armv*) arch="arm" ;;
     arm64 | aarch64) arch="arm64" ;;
+    ppc64le) arch="ppc64" ;;
+    # Node names both POWER endiannesses ppc64; only little-endian is built.
+    ppc64) return 1 ;;
   esac
 
   # `uname -m` in some cases mis-reports 32-bit OS as 64-bit, so double check
@@ -304,16 +318,38 @@ detect_arch() {
   case "$arch" in
     x64*) ;;
     arm64*) ;;
+    ppc64 | riscv64 | s390x) ;;
     *) return 1
   esac
   printf '%s' "${arch}"
 }
 
+assert_target_is_built() {
+  local platform arch major
+  platform="$1"
+  arch="$2"
+  major="$3"
+
+  case "${platform}-${arch}" in
+    android-arm64 | android-x64) ;;
+    freebsd-x64 | linux-ppc64 | linux-riscv64 | linux-s390x) ;;
+    darwin-x64 | darwin-arm64 | linux-x64 | linux-arm64 | win32-x64 | win32-arm64) return 0 ;;
+    *) abort "Sorry! pnpm does not provide a pre-built binary for ${platform}-${arch}." ;;
+  esac
+  if [ "$major" -lt 12 ]; then
+    abort \
+      "pnpm v${major} does not provide a pre-built binary for ${platform}-${arch}." \
+      "" \
+      "pnpm 12 does. Install it with:" \
+      "  PNPM_VERSION=12 sh -c \"\$(curl -fsSL https://get.pnpm.io/install.sh)\""
+  fi
+}
+
 download_and_install() {
   local platform arch libc_suffix version tmp_dir major_version asset_base
   platform="$(detect_platform)"
-  arch="$(detect_arch)" || abort "Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures."
-  libc_suffix="$(detect_libc_suffix)"
+  arch="$(detect_arch)" || abort "Sorry! pnpm does not provide a pre-built binary for this architecture."
+  libc_suffix="$(detect_libc_suffix "$platform" "$arch")"
   # PNPM_VERSION takes a dist-tag, a version, or a major, as it does in
   # install.ps1.
   resolve_version "${PNPM_VERSION:-latest}"
@@ -350,6 +386,8 @@ download_and_install() {
   case "$major_version" in
     '' | *[!0-9]*) abort "Invalid pnpm version: $version" ;;
   esac
+
+  assert_target_is_built "$platform" "$arch" "$major_version"
 
   # Intel macOS isn't supported on pnpm v11 only: the SEA binary produced
   # by Node.js for darwin-x64 segfaults at startup because of an upstream

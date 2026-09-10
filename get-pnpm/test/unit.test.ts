@@ -57,9 +57,33 @@ describe('platformPackageName', () => {
     assert.equal(platformPackageName(target({ platform: 'darwin', arch: 'arm64', musl: true })), '@pnpm/macos-arm64')
   })
 
+  test('v12 builds for hosts outside the x64/arm64 matrix', () => {
+    assert.equal(platformPackageName(target({ major: 12, platform: 'freebsd' })), '@pnpm/exe.freebsd-x64')
+    assert.equal(platformPackageName(target({ major: 12, arch: 'ppc64' })), '@pnpm/exe.linux-ppc64')
+    assert.equal(platformPackageName(target({ major: 12, arch: 'riscv64' })), '@pnpm/exe.linux-riscv64')
+    assert.equal(platformPackageName(target({ major: 12, arch: 's390x' })), '@pnpm/exe.linux-s390x')
+    assert.equal(platformPackageName(target({ major: 12, platform: 'android', arch: 'arm64' })), '@pnpm/exe.android-arm64')
+    assert.equal(platformPackageName(target({ major: 12, platform: 'android' })), '@pnpm/exe.android-x64')
+  })
+
+  test('those hosts have no binary before v12, and are pointed at it', () => {
+    assert.throws(() => platformPackageName(target({ platform: 'freebsd' })), /pnpm v11 does not.*npx get-pnpm 12/s)
+    assert.throws(() => platformPackageName(target({ arch: 's390x' })), /npx get-pnpm 12/s)
+  })
+
+  test('a musl suffix is never added to them', () => {
+    assert.equal(platformPackageName(target({ major: 12, arch: 'ppc64', musl: true })), '@pnpm/exe.linux-ppc64')
+    // Android is bionic. `isMusl()` only ever reports true on Linux, but the
+    // name must not carry a libc either way.
+    assert.equal(platformPackageName(target({ major: 12, platform: 'android', musl: true })), '@pnpm/exe.android-x64')
+  })
+
   test('rejects hosts pnpm publishes no binary for', () => {
-    assert.throws(() => platformPackageName(target({ arch: 'ia32' })), /x86_64\/arm64/)
-    assert.throws(() => platformPackageName(target({ platform: 'freebsd' })), /freebsd/)
+    assert.throws(() => platformPackageName(target({ arch: 'ia32' })), /linux-ia32/)
+    assert.throws(() => platformPackageName(target({ major: 12, arch: 'ia32' })), /linux-ia32/)
+    assert.throws(() => platformPackageName(target({ major: 12, platform: 'openbsd' })), /openbsd-x64/)
+    // riscv64 is built for Linux only, so it is not a free pass on any OS.
+    assert.throws(() => platformPackageName(target({ major: 12, platform: 'openbsd', arch: 'riscv64' })), /openbsd-riscv64/)
   })
 
   test('points Intel macOS users away from v11, which has no working binary', () => {

@@ -1,10 +1,9 @@
 #!/bin/sh
 # Asserts what PNPM_VERSION accepts and what it refuses.
 #
-# The installer is sourced with its last line — the call that performs an
-# install — removed, and its `download` replaced by a fixed packument. Every
-# case below is decided by the shipped resolution code, and none of them reach
-# the network.
+# The installer is sourced with its entry-point call removed, and its
+# `download` replaced by a fixed packument. Every case below is decided by
+# the shipped resolution code, and none of them reach the network.
 set -eu
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -12,7 +11,7 @@ root="$(dirname "$here")"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 
-sed '$d' "$root/install.sh" > "$work/installer.sh"
+sed '/^download_and_install || abort "Install Error!"$/d' "$root/install.sh" > "$work/installer.sh"
 
 # Shaped like the real thing, and pinned: `latest-12` is deliberately absent, so
 # a major that has been published but not yet promoted stays covered here after

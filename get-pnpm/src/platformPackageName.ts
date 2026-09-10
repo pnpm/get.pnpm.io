@@ -9,6 +9,15 @@ export interface Target {
   musl: boolean
 }
 
+const V12_ONLY_TARGETS = new Set([
+  'android-arm64',
+  'android-x64',
+  'freebsd-x64',
+  'linux-ppc64',
+  'linux-riscv64',
+  'linux-s390x',
+])
+
 /**
  * Name of the npm package that carries the pnpm executable for `target`.
  *
@@ -17,15 +26,21 @@ export interface Target {
  * publishes `@pnpm/exe.<process.platform>-<arch>[-musl]`, while v11 and older
  * publish `@pnpm/<macos|win|linux|linuxstatic>-<arch>`.
  *
- * @throws if pnpm publishes no binary for the host — either because the
- * architecture was never supported, or because of the v11-only Intel macOS gap.
+ * @throws if pnpm publishes no binary for the host — because the host is not
+ * built for at all, because the binary arrived in v12 and an older major was
+ * asked for, or because of the v11-only Intel macOS gap.
  */
 export function platformPackageName ({ major, platform, arch, musl }: Target): string {
-  if (arch !== 'x64' && arch !== 'arm64') {
-    throw new Error('Sorry! pnpm currently only provides pre-built binaries for x86_64/arm64 architectures.')
+  const target = `${platform}-${arch}`
+  if (V12_ONLY_TARGETS.has(target)) {
+    if (major >= 12) return `@pnpm/exe.${target}`
+    throw new Error(`pnpm v${major} does not provide a pre-built binary for ${target}. pnpm 12 does:
+
+  npx get-pnpm 12`)
   }
-  if (platform !== 'darwin' && platform !== 'linux' && platform !== 'win32') {
-    throw new Error(`Sorry! pnpm does not provide a pre-built binary for ${platform}.`)
+  if ((arch !== 'x64' && arch !== 'arm64') ||
+    (platform !== 'darwin' && platform !== 'linux' && platform !== 'win32')) {
+    throw new Error(`Sorry! pnpm does not provide a pre-built binary for ${target}.`)
   }
   if (platform === 'darwin' && arch === 'x64' && major === 11) {
     throw new Error(`pnpm v11 does not provide a working binary for Intel macOS (darwin-x64) due to an upstream Node.js SEA bug.
