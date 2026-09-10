@@ -41,6 +41,7 @@ The download goes to the registry npm is configured with (`npm_config_registry`)
 | `PNPM_VERSION` | Version to install when no argument is given. |
 | `PNPM_HOME` | Directory to install pnpm into. |
 | `npm_config_registry` | Registry to download pnpm from. |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | Proxy to download through, and hosts to reach directly. Applied on Node 24.14 and later; earlier releases go direct. |
 
 ## Using it from a program
 

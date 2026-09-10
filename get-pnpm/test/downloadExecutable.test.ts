@@ -29,10 +29,16 @@ type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'unsigned' | 'no-integrity'
 let tmpDir: string
 let server: http.Server
 let cdn: http.Server
+let proxy: http.Server
 let registry: string
 let mode: Mode = 'ok'
 let requests: Array<{ path: string, authorization?: string }> = []
 let cdnRequests: Array<{ path: string, authorization?: string }> = []
+let proxyRequests: string[] = []
+
+// Node applies a proxy after startup from 24.14; before that the request goes
+// direct, which the proxy tests have nothing to say about.
+const PROXY_UNSUPPORTED = typeof (http as { setGlobalProxyFromEnv?: unknown }).setGlobalProxyFromEnv !== 'function'
 
 describe('downloadPnpmExecutable', () => {
   before(async () => {
@@ -96,10 +102,25 @@ describe('downloadPnpmExecutable', () => {
     })
     await listen(server)
     registry = `${addressOf(server)}/`
+
+    // A forwarding proxy: a client that routes through it asks for the full
+    // URL, which is relayed to the origin it names. The relay gets an agent of
+    // its own, since the global one is what the code under test points at the
+    // proxy, and the relay would otherwise loop back through it to itself.
+    proxy = http.createServer((req, res) => {
+      proxyRequests.push(req.url!)
+      const target = new URL(req.url!)
+      const relay = http.request(target, { method: req.method, headers: req.headers, agent: new http.Agent() }, (upstream) => {
+        res.writeHead(upstream.statusCode!, upstream.headers)
+        upstream.pipe(res)
+      })
+      req.pipe(relay)
+    })
+    await listen(proxy)
   })
 
   after(async () => {
-    await Promise.all([close(server), close(cdn)])
+    await Promise.all([close(server), close(cdn), close(proxy)])
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
@@ -107,6 +128,7 @@ describe('downloadPnpmExecutable', () => {
     mode = 'ok'
     requests = []
     cdnRequests = []
+    proxyRequests = []
   })
 
   test('places the executable and nothing else', async () => {
@@ -140,6 +162,72 @@ describe('downloadPnpmExecutable', () => {
 
     assert.equal(requests[0]!.authorization, 'Bearer a-token')
     assert.equal(cdnRequests[0]!.authorization, undefined)
+  })
+
+  test('routes the download through the proxy the environment names', { skip: PROXY_UNSUPPORTED }, async () => {
+    const destPath = destIn('proxied')
+
+    await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
+      await download(destPath)
+    })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.deepEqual(proxyRequests, [
+      `${registry}${packageNameFor()}/${VERSION}`,
+      `${addressOf(cdn)}/${packageNameFor()}/-/tarball.tgz`,
+    ])
+    assert.equal(requests.length, 1, 'the registry was reached through the proxy')
+    assert.equal(cdnRequests.length, 1, 'the download host was reached through the proxy')
+  })
+
+  test('leaves the proxy alone for a host NO_PROXY excludes', { skip: PROXY_UNSUPPORTED }, async () => {
+    const destPath = destIn('unproxied')
+
+    await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: '127.0.0.1' }, async () => {
+      await download(destPath)
+    })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.deepEqual(proxyRequests, [])
+  })
+
+  test('stops using the proxy once the download is done', { skip: PROXY_UNSUPPORTED }, async () => {
+    await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
+      await download(destIn('restored'))
+      proxyRequests = []
+      await fetch(`${registry}${packageNameFor()}/${VERSION}`)
+    })
+
+    assert.deepEqual(proxyRequests, [], 'a request after the download went direct')
+  })
+
+  test('keeps the proxy until the last of two overlapping downloads is done', { skip: PROXY_UNSUPPORTED }, async () => {
+    // Every request the first download makes goes through the proxy even after
+    // the second finishes; the direct route comes back only once both are done.
+    let proxied = 0
+    await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
+      await Promise.all([download(destIn('overlap-a')), download(destIn('overlap-b'))])
+      proxied = proxyRequests.length
+      proxyRequests = []
+      await fetch(`${registry}${packageNameFor()}/${VERSION}`)
+    })
+
+    assert.equal(proxied, 4, 'both metadata requests and both downloads went through the proxy')
+    assert.deepEqual(proxyRequests, [], 'a request after both downloads went direct')
+  })
+
+  test('activates the proxy on a retry after a malformed proxy URL was rejected', { skip: PROXY_UNSUPPORTED }, async () => {
+    await withEnv({ HTTP_PROXY: 'not a url', NO_PROXY: undefined }, async () => {
+      await assert.rejects(download(destIn('malformed')))
+    })
+    const destPath = destIn('retried')
+
+    await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
+      await download(destPath)
+    })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.equal(proxyRequests.length, 2, 'the retry went through the proxy')
   })
 
   test('re-hosts an npm tarball URL onto the registry that served the metadata', async () => {
@@ -245,6 +333,24 @@ describe('downloadPnpmExecutable', () => {
     assert.deepEqual(fs.readdirSync(path.dirname(destPath)), [])
   })
 })
+
+/** Runs `fn` with the proxy variables set as given, then puts them back. */
+async function withEnv (vars: Record<string, string | undefined>, fn: () => Promise<void>): Promise<void> {
+  const names = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy']
+  const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]))
+  for (const name of names) delete process.env[name]
+  for (const [name, value] of Object.entries(vars)) {
+    if (value !== undefined) process.env[name] = value
+  }
+  try {
+    await fn()
+  } finally {
+    for (const name of names) {
+      if (saved[name] === undefined) delete process.env[name]
+      else process.env[name] = saved[name]
+    }
+  }
+}
 
 async function download (destPath: string): Promise<unknown> {
   return downloadPnpmExecutable({ version: VERSION, registry, destPath, keys: KEYS })
