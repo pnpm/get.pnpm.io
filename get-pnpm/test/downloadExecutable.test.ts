@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { createHash, createSign, generateKeyPairSync } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
@@ -34,7 +35,8 @@ let registry: string
 let mode: Mode = 'ok'
 let requests: Array<{ path: string, authorization?: string }> = []
 let cdnRequests: Array<{ path: string, authorization?: string }> = []
-let proxyRequests: string[] = []
+/** `host:port` of every origin a client reached through the proxy. */
+let proxiedOrigins: string[] = []
 
 // Node applies a proxy after startup from 24.14; before that the request goes
 // direct, which the proxy tests have nothing to say about.
@@ -103,18 +105,32 @@ describe('downloadPnpmExecutable', () => {
     await listen(server)
     registry = `${addressOf(server)}/`
 
-    // A forwarding proxy: a client that routes through it asks for the full
-    // URL, which is relayed to the origin it names. The relay gets an agent of
-    // its own, since the global one is what the code under test points at the
-    // proxy, and the relay would otherwise loop back through it to itself.
+    // A forwarding proxy. Which of the two forms a proxied client uses for a
+    // plain-http origin depends on the Node release: a CONNECT tunnel, or a
+    // request for the full URL that the proxy relays. Both are served, and both
+    // record the origin reached. The relay gets an agent of its own, since the
+    // global one is what the code under test points at the proxy, and the relay
+    // would otherwise loop back through it to itself.
     proxy = http.createServer((req, res) => {
-      proxyRequests.push(req.url!)
       const target = new URL(req.url!)
+      proxiedOrigins.push(target.host)
       const relay = http.request(target, { method: req.method, headers: req.headers, agent: new http.Agent() }, (upstream) => {
         res.writeHead(upstream.statusCode!, upstream.headers)
         upstream.pipe(res)
       })
       req.pipe(relay)
+    })
+    proxy.on('connect', (req, socket, head) => {
+      proxiedOrigins.push(req.url!)
+      const { hostname, port } = new URL(`http://${req.url!}`)
+      const upstream = net.connect(Number(port), hostname, () => {
+        socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+        upstream.write(head)
+        upstream.pipe(socket)
+        socket.pipe(upstream)
+      })
+      upstream.on('error', () => { socket.destroy() })
+      socket.on('error', () => { upstream.destroy() })
     })
     await listen(proxy)
   })
@@ -128,7 +144,7 @@ describe('downloadPnpmExecutable', () => {
     mode = 'ok'
     requests = []
     cdnRequests = []
-    proxyRequests = []
+    proxiedOrigins = []
   })
 
   test('places the executable and nothing else', async () => {
@@ -172,10 +188,7 @@ describe('downloadPnpmExecutable', () => {
     })
 
     assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
-    assert.deepEqual(proxyRequests, [
-      `${registry}${packageNameFor()}/${VERSION}`,
-      `${addressOf(cdn)}/${packageNameFor()}/-/tarball.tgz`,
-    ])
+    assert.deepEqual(new Set(proxiedOrigins), new Set([hostOf(server), hostOf(cdn)]))
     assert.equal(requests.length, 1, 'the registry was reached through the proxy')
     assert.equal(cdnRequests.length, 1, 'the download host was reached through the proxy')
   })
@@ -188,32 +201,32 @@ describe('downloadPnpmExecutable', () => {
     })
 
     assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
-    assert.deepEqual(proxyRequests, [])
+    assert.deepEqual(proxiedOrigins, [])
   })
 
   test('stops using the proxy once the download is done', { skip: PROXY_UNSUPPORTED }, async () => {
     await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
       await download(destIn('restored'))
-      proxyRequests = []
+      proxiedOrigins = []
       await fetch(`${registry}${packageNameFor()}/${VERSION}`)
     })
 
-    assert.deepEqual(proxyRequests, [], 'a request after the download went direct')
+    assert.deepEqual(proxiedOrigins, [], 'a request after the download went direct')
   })
 
   test('keeps the proxy until the last of two overlapping downloads is done', { skip: PROXY_UNSUPPORTED }, async () => {
     // Every request the first download makes goes through the proxy even after
     // the second finishes; the direct route comes back only once both are done.
-    let proxied = 0
     await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
       await Promise.all([download(destIn('overlap-a')), download(destIn('overlap-b'))])
-      proxied = proxyRequests.length
-      proxyRequests = []
+      assert.deepEqual(new Set(proxiedOrigins), new Set([hostOf(server), hostOf(cdn)]))
+      assert.equal(requests.length, 2, 'both metadata requests arrived')
+      assert.equal(cdnRequests.length, 2, 'both downloads arrived')
+      proxiedOrigins = []
       await fetch(`${registry}${packageNameFor()}/${VERSION}`)
     })
 
-    assert.equal(proxied, 4, 'both metadata requests and both downloads went through the proxy')
-    assert.deepEqual(proxyRequests, [], 'a request after both downloads went direct')
+    assert.deepEqual(proxiedOrigins, [], 'a request after both downloads went direct')
   })
 
   test('activates the proxy on a retry after a malformed proxy URL was rejected', { skip: PROXY_UNSUPPORTED }, async () => {
@@ -227,7 +240,7 @@ describe('downloadPnpmExecutable', () => {
     })
 
     assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
-    assert.equal(proxyRequests.length, 2, 'the retry went through the proxy')
+    assert.deepEqual(new Set(proxiedOrigins), new Set([hostOf(server), hostOf(cdn)]), 'the retry went through the proxy')
   })
 
   test('re-hosts an npm tarball URL onto the registry that served the metadata', async () => {
@@ -406,5 +419,9 @@ async function close (target: http.Server): Promise<void> {
 }
 
 function addressOf (target: http.Server): string {
-  return `http://127.0.0.1:${(target.address() as { port: number }).port}`
+  return `http://${hostOf(target)}`
+}
+
+function hostOf (target: http.Server): string {
+  return `127.0.0.1:${(target.address() as { port: number }).port}`
 }
