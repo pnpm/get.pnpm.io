@@ -31,12 +31,16 @@ let tmpDir: string
 let server: http.Server
 let cdn: http.Server
 let proxy: http.Server
+/** An origin nothing downloads from, to probe the route a request takes. */
+let probe: http.Server
 let registry: string
 let mode: Mode = 'ok'
 let requests: Array<{ path: string, authorization?: string }> = []
 let cdnRequests: Array<{ path: string, authorization?: string }> = []
 /** `host:port` of every origin a client reached through the proxy. */
 let proxiedOrigins: string[] = []
+/** When set, the second tarball request of a test waits on it before being served. */
+let holdSecondTarball: Promise<void> | null = null
 
 // Node applies a proxy after startup from 24.14; before that the request goes
 // direct, which the proxy tests have nothing to say about.
@@ -63,11 +67,15 @@ describe('downloadPnpmExecutable', () => {
       res.end(mode === 'bad-tarball' ? Buffer.concat([bytes, Buffer.from('tampered')]) : bytes)
     }
 
-    cdn = http.createServer((req, res) => {
+    cdn = http.createServer(async (req, res) => {
       cdnRequests.push({ path: req.url!, authorization: req.headers.authorization })
+      if (cdnRequests.length === 2 && holdSecondTarball != null) await holdSecondTarball
       serveTarball(res)
     })
     await listen(cdn)
+
+    probe = http.createServer((req, res) => { res.end() })
+    await listen(probe)
 
     server = http.createServer((req, res) => {
       const url = decodeURIComponent(req.url!)
@@ -136,7 +144,7 @@ describe('downloadPnpmExecutable', () => {
   })
 
   after(async () => {
-    await Promise.all([close(server), close(cdn), close(proxy)])
+    await Promise.all([close(server), close(cdn), close(proxy), close(probe)])
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
@@ -145,6 +153,7 @@ describe('downloadPnpmExecutable', () => {
     requests = []
     cdnRequests = []
     proxiedOrigins = []
+    holdSecondTarball = null
   })
 
   test('places the executable and nothing else', async () => {
@@ -215,15 +224,24 @@ describe('downloadPnpmExecutable', () => {
   })
 
   test('keeps the proxy until the last of two overlapping downloads is done', { skip: PROXY_UNSUPPORTED }, async () => {
-    // Every request the first download makes goes through the proxy even after
-    // the second finishes; the direct route comes back only once both are done.
+    // One download is held at its tarball until the other has finished. A
+    // request made in that window still goes through the proxy; the direct
+    // route comes back only once the held download is done too. The probe is an
+    // origin nothing has reached yet, so no pooled tunnel can hide the route.
+    let release!: () => void
+    holdSecondTarball = new Promise((resolve) => { release = resolve })
     await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
-      await Promise.all([download(destIn('overlap-a')), download(destIn('overlap-b'))])
-      assert.deepEqual(new Set(proxiedOrigins), new Set([hostOf(server), hostOf(cdn)]))
-      assert.equal(requests.length, 2, 'both metadata requests arrived')
-      assert.equal(cdnRequests.length, 2, 'both downloads arrived')
+      const downloads = [download(destIn('overlap-a')), download(destIn('overlap-b'))]
+      await Promise.race(downloads)
       proxiedOrigins = []
-      await fetch(`${registry}${packageNameFor()}/${VERSION}`)
+
+      await fetch(`${addressOf(probe)}/held`)
+
+      assert.deepEqual(proxiedOrigins, [hostOf(probe)], 'a request while one download is still running went through the proxy')
+      release()
+      await Promise.all(downloads)
+      proxiedOrigins = []
+      await fetch(`${addressOf(probe)}/released`)
     })
 
     assert.deepEqual(proxiedOrigins, [], 'a request after both downloads went direct')
