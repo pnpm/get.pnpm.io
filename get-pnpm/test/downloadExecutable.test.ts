@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { createHash, createSign, generateKeyPairSync } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
@@ -29,10 +30,21 @@ type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'unsigned' | 'no-integrity'
 let tmpDir: string
 let server: http.Server
 let cdn: http.Server
+let proxy: http.Server
+/** An origin nothing downloads from, to probe the route a request takes. */
+let probe: http.Server
 let registry: string
 let mode: Mode = 'ok'
 let requests: Array<{ path: string, authorization?: string }> = []
 let cdnRequests: Array<{ path: string, authorization?: string }> = []
+/** `host:port` of every origin a client reached through the proxy. */
+let proxiedOrigins: string[] = []
+/** When set, the second tarball request of a test waits on it before being served. */
+let holdSecondTarball: Promise<void> | null = null
+
+// Node applies a proxy after startup from 24.14; before that the request goes
+// direct, which the proxy tests have nothing to say about.
+const PROXY_UNSUPPORTED = typeof (http as { setGlobalProxyFromEnv?: unknown }).setGlobalProxyFromEnv !== 'function'
 
 describe('downloadPnpmExecutable', () => {
   before(async () => {
@@ -55,11 +67,15 @@ describe('downloadPnpmExecutable', () => {
       res.end(mode === 'bad-tarball' ? Buffer.concat([bytes, Buffer.from('tampered')]) : bytes)
     }
 
-    cdn = http.createServer((req, res) => {
+    cdn = http.createServer(async (req, res) => {
       cdnRequests.push({ path: req.url!, authorization: req.headers.authorization })
+      if (cdnRequests.length === 2 && holdSecondTarball != null) await holdSecondTarball
       serveTarball(res)
     })
     await listen(cdn)
+
+    probe = http.createServer((req, res) => { res.end() })
+    await listen(probe)
 
     server = http.createServer((req, res) => {
       const url = decodeURIComponent(req.url!)
@@ -96,10 +112,39 @@ describe('downloadPnpmExecutable', () => {
     })
     await listen(server)
     registry = `${addressOf(server)}/`
+
+    // A forwarding proxy. Which of the two forms a proxied client uses for a
+    // plain-http origin depends on the Node release: a CONNECT tunnel, or a
+    // request for the full URL that the proxy relays. Both are served, and both
+    // record the origin reached. The relay gets an agent of its own, since the
+    // global one is what the code under test points at the proxy, and the relay
+    // would otherwise loop back through it to itself.
+    proxy = http.createServer((req, res) => {
+      const target = new URL(req.url!)
+      proxiedOrigins.push(target.host)
+      const relay = http.request(target, { method: req.method, headers: req.headers, agent: new http.Agent() }, (upstream) => {
+        res.writeHead(upstream.statusCode!, upstream.headers)
+        upstream.pipe(res)
+      })
+      req.pipe(relay)
+    })
+    proxy.on('connect', (req, socket, head) => {
+      proxiedOrigins.push(req.url!)
+      const { hostname, port } = new URL(`http://${req.url!}`)
+      const upstream = net.connect(Number(port), hostname, () => {
+        socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+        upstream.write(head)
+        upstream.pipe(socket)
+        socket.pipe(upstream)
+      })
+      upstream.on('error', () => { socket.destroy() })
+      socket.on('error', () => { upstream.destroy() })
+    })
+    await listen(proxy)
   })
 
   after(async () => {
-    await Promise.all([close(server), close(cdn)])
+    await Promise.all([close(server), close(cdn), close(proxy), close(probe)])
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
@@ -107,6 +152,8 @@ describe('downloadPnpmExecutable', () => {
     mode = 'ok'
     requests = []
     cdnRequests = []
+    proxiedOrigins = []
+    holdSecondTarball = null
   })
 
   test('places the executable and nothing else', async () => {
@@ -140,6 +187,78 @@ describe('downloadPnpmExecutable', () => {
 
     assert.equal(requests[0]!.authorization, 'Bearer a-token')
     assert.equal(cdnRequests[0]!.authorization, undefined)
+  })
+
+  test('routes the download through the proxy the environment names', { skip: PROXY_UNSUPPORTED }, async () => {
+    const destPath = destIn('proxied')
+
+    await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
+      await download(destPath)
+    })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.deepEqual(new Set(proxiedOrigins), new Set([hostOf(server), hostOf(cdn)]))
+    assert.equal(requests.length, 1, 'the registry was reached through the proxy')
+    assert.equal(cdnRequests.length, 1, 'the download host was reached through the proxy')
+  })
+
+  test('leaves the proxy alone for a host NO_PROXY excludes', { skip: PROXY_UNSUPPORTED }, async () => {
+    const destPath = destIn('unproxied')
+
+    await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: '127.0.0.1' }, async () => {
+      await download(destPath)
+    })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.deepEqual(proxiedOrigins, [])
+  })
+
+  test('stops using the proxy once the download is done', { skip: PROXY_UNSUPPORTED }, async () => {
+    await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
+      await download(destIn('restored'))
+      proxiedOrigins = []
+      await fetch(`${registry}${packageNameFor()}/${VERSION}`)
+    })
+
+    assert.deepEqual(proxiedOrigins, [], 'a request after the download went direct')
+  })
+
+  test('keeps the proxy until the last of two overlapping downloads is done', { skip: PROXY_UNSUPPORTED }, async () => {
+    // One download is held at its tarball until the other has finished. A
+    // request made in that window still goes through the proxy; the direct
+    // route comes back only once the held download is done too. The probe is an
+    // origin nothing has reached yet, so no pooled tunnel can hide the route.
+    let release!: () => void
+    holdSecondTarball = new Promise((resolve) => { release = resolve })
+    await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
+      const downloads = [download(destIn('overlap-a')), download(destIn('overlap-b'))]
+      await Promise.race(downloads)
+      proxiedOrigins = []
+
+      await fetch(`${addressOf(probe)}/held`)
+
+      assert.deepEqual(proxiedOrigins, [hostOf(probe)], 'a request while one download is still running went through the proxy')
+      release()
+      await Promise.all(downloads)
+      proxiedOrigins = []
+      await fetch(`${addressOf(probe)}/released`)
+    })
+
+    assert.deepEqual(proxiedOrigins, [], 'a request after both downloads went direct')
+  })
+
+  test('activates the proxy on a retry after a malformed proxy URL was rejected', { skip: PROXY_UNSUPPORTED }, async () => {
+    await withEnv({ HTTP_PROXY: 'not a url', NO_PROXY: undefined }, async () => {
+      await assert.rejects(download(destIn('malformed')))
+    })
+    const destPath = destIn('retried')
+
+    await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
+      await download(destPath)
+    })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.deepEqual(new Set(proxiedOrigins), new Set([hostOf(server), hostOf(cdn)]), 'the retry went through the proxy')
   })
 
   test('re-hosts an npm tarball URL onto the registry that served the metadata', async () => {
@@ -246,6 +365,24 @@ describe('downloadPnpmExecutable', () => {
   })
 })
 
+/** Runs `fn` with the proxy variables set as given, then puts them back. */
+async function withEnv (vars: Record<string, string | undefined>, fn: () => Promise<void>): Promise<void> {
+  const names = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy']
+  const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]))
+  for (const name of names) delete process.env[name]
+  for (const [name, value] of Object.entries(vars)) {
+    if (value !== undefined) process.env[name] = value
+  }
+  try {
+    await fn()
+  } finally {
+    for (const name of names) {
+      if (saved[name] === undefined) delete process.env[name]
+      else process.env[name] = saved[name]
+    }
+  }
+}
+
 async function download (destPath: string): Promise<unknown> {
   return downloadPnpmExecutable({ version: VERSION, registry, destPath, keys: KEYS })
 }
@@ -300,5 +437,9 @@ async function close (target: http.Server): Promise<void> {
 }
 
 function addressOf (target: http.Server): string {
-  return `http://127.0.0.1:${(target.address() as { port: number }).port}`
+  return `http://${hostOf(target)}`
+}
+
+function hostOf (target: http.Server): string {
+  return `127.0.0.1:${(target.address() as { port: number }).port}`
 }
