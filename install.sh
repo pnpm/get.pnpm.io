@@ -470,4 +470,150 @@ download_and_install() {
   fi
 }
 
+# Where `pnpm setup` installs: PNPM_HOME, or pnpm's default for the platform,
+# resolved the way pnpm resolves it (XDG_DATA_HOME first, then the platform
+# directory).
+pnpm_home_dir() {
+  if [ -n "${PNPM_HOME:-}" ]; then
+    printf '%s' "$PNPM_HOME"
+  elif [ -n "${XDG_DATA_HOME:-}" ]; then
+    printf '%s/pnpm' "$XDG_DATA_HOME"
+  elif [ "$(detect_platform)" = 'darwin' ]; then
+    printf '%s/Library/pnpm' "$HOME"
+  else
+    printf '%s/.local/share/pnpm' "$HOME"
+  fi
+}
+
+# The path with every symlink resolved, or the path itself where nothing can
+# resolve it (`readlink -f` only reached macOS in 12.3). These functions run
+# their utilities through `command -p`, on the system's default PATH, because
+# the PATH being examined is the one that may hold a stray `pnpm`.
+real_path() {
+  command -p realpath "$1" 2>/dev/null || command -p readlink -f "$1" 2>/dev/null || printf '%s' "$1"
+}
+
+# Whether "$1" is a directory `pnpm setup` links pnpm into: `$PNPM_HOME/bin`,
+# or `$PNPM_HOME` itself, which the v10 layout linked into directly. Either
+# side may reach the directory through a symlink (`/var` on macOS is one).
+is_pnpm_home_bin() {
+  local dir pnpm_home
+  dir="${1%/}"
+  pnpm_home="${2%/}"
+  if [ "$dir" = "$pnpm_home/bin" ] || [ "$dir" = "$pnpm_home" ]; then
+    return 0
+  fi
+  dir="$(real_path "$dir")"
+  [ "$dir" = "$(real_path "$pnpm_home/bin")" ] || [ "$dir" = "$(real_path "$pnpm_home")" ]
+}
+
+# The first `pnpm` a PATH lookup finds when it is not the one `pnpm setup`
+# installed under "$1", left in SHADOWING_PNPM; the exit status is 1 when the
+# shell finds pnpm's own first, or none at all. SHADOWED_BIN_ON_PATH is `yes`
+# when `$1/bin` is on PATH at all, behind SHADOWING_PNPM. Both come back in
+# variables so the function can run in the shell that reads them, not in a
+# command substitution's subshell.
+#
+# A `pnpm` from another installer (npm, Homebrew, Corepack, Volta) that sits
+# ahead of `$1/bin` on PATH keeps running after this script reports success,
+# so every version it installs looks like it never took. This is what makes
+# the install script say so.
+find_shadowing_pnpm() {
+  local pnpm_home dir candidate rest
+  pnpm_home="$1"
+  SHADOWING_PNPM=''
+  SHADOWED_BIN_ON_PATH=no
+  rest="$PATH"
+  while [ -n "$rest" ]; do
+    case "$rest" in
+      *:*) dir="${rest%%:*}"; rest="${rest#*:}" ;;
+      *) dir="$rest"; rest='' ;;
+    esac
+    [ -n "$dir" ] || dir='.'
+    if is_pnpm_home_bin "$dir" "$pnpm_home"; then
+      [ -n "$SHADOWING_PNPM" ] || return 1
+      SHADOWED_BIN_ON_PATH=yes
+      break
+    fi
+    [ -z "$SHADOWING_PNPM" ] || continue
+    candidate="$dir/pnpm"
+    [ -f "$candidate" ] && [ -x "$candidate" ] || continue
+    # A symlink into pnpm's own directory runs the pnpm just installed.
+    if is_pnpm_home_bin "$(command -p dirname "$(real_path "$candidate")")" "$pnpm_home"; then
+      return 1
+    fi
+    SHADOWING_PNPM="$candidate"
+  done
+  [ -n "$SHADOWING_PNPM" ]
+}
+
+# How the `pnpm` at "$1" got there, as far as its location and, for a shim
+# script, its contents tell: npm, homebrew, corepack, volta, or unknown.
+install_origin() {
+  local executable
+  for executable in "$(real_path "$1")" "$1"; do
+    case "$executable" in
+      */Cellar/pnpm/*) printf 'homebrew'; return ;;
+      *corepack*) printf 'corepack'; return ;;
+      */.volta/*) printf 'volta'; return ;;
+      */node_modules/pnpm/*) printf 'npm'; return ;;
+    esac
+  done
+  # npm's and Corepack's shims name their target inside; a real executable
+  # is far larger than any shim, so only its head is read.
+  if command -p head -c 65536 "$1" 2>/dev/null | command -p grep -q 'corepack'; then
+    printf 'corepack'
+  elif command -p head -c 65536 "$1" 2>/dev/null | command -p grep -q 'node_modules/pnpm/'; then
+    printf 'npm'
+  else
+    printf 'unknown'
+  fi
+}
+
+# The warning for a `pnpm` at "$1" of origin "$2" that shadows the one
+# installed under "$3". `SHADOWED_BIN_ON_PATH` tells which of the two
+# situations it describes.
+shadowing_pnpm_warning() {
+  local executable origin pnpm_home described removal reorder fix
+  executable="$1"
+  origin="$2"
+  pnpm_home="$3"
+  case "$origin" in
+    npm) described='installed with npm'; removal='npm uninstall -g pnpm' ;;
+    homebrew) described='installed with Homebrew'; removal='brew uninstall pnpm' ;;
+    corepack) described='a Corepack shim'; removal='corepack disable pnpm' ;;
+    volta) described='installed with Volta'; removal='volta uninstall pnpm' ;;
+    *) described='not installed by pnpm'; removal='' ;;
+  esac
+  reorder="move $pnpm_home/bin ahead of $(command -p dirname "$executable") in PATH"
+  if [ -n "$removal" ]; then
+    fix="run \"$removal\" or $reorder"
+  else
+    fix="$reorder"
+  fi
+  if [ "$SHADOWED_BIN_ON_PATH" = 'yes' ]; then
+    printf '%s\n' \
+      "Warning: \"pnpm\" on PATH is $executable ($described), which comes before $pnpm_home/bin." \
+      "Your shell keeps running that pnpm, not the one pnpm installed to $pnpm_home/bin." \
+      "To finish switching, $fix."
+  else
+    printf '%s\n' \
+      "Warning: \"pnpm\" on PATH is $executable ($described), and $pnpm_home/bin is not on PATH yet." \
+      "Once a new shell adds it, it has to come first: $fix."
+  fi
+}
+
+# Say so when the pnpm just installed is not the one PATH resolves, or the
+# success above is the last thing the person reads before `pnpm --version`
+# prints the old version again. Windows paths take another shape under
+# MSYS, so the lookup is left to `pnpm setup` there.
+warn_if_pnpm_is_shadowed() {
+  local pnpm_home
+  [ "$(detect_platform)" != 'win32' ] || return 0
+  pnpm_home="$(pnpm_home_dir)"
+  find_shadowing_pnpm "$pnpm_home" || return 0
+  shadowing_pnpm_warning "$SHADOWING_PNPM" "$(install_origin "$SHADOWING_PNPM")" "$pnpm_home" >&2
+}
+
 download_and_install || abort "Install Error!"
+warn_if_pnpm_is_shadowed

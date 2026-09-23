@@ -125,6 +125,21 @@ gh attestation verify pnpm-macos-arm64 --repo pnpm/pnpm         # v10 and older
 That confirms the file was built by pnpm's release workflow from the signed release tag,
 and the attestation is recorded in a public transparency log.
 
+## If `pnpm --version` still prints the old version
+
+A `pnpm` installed another way — `npm install -g pnpm`, Homebrew, Corepack, Volta —
+that comes before `$PNPM_HOME/bin` on your `PATH` keeps running after the installer
+finishes. The installer looks for one when it is done and says which it found and how
+to remove it, for example:
+
+```text
+Warning: "pnpm" on PATH is /opt/homebrew/bin/pnpm (installed with npm), which comes before /Users/me/Library/pnpm/bin.
+Your shell keeps running that pnpm, not the one pnpm installed to /Users/me/Library/pnpm/bin.
+To finish switching, run "npm uninstall -g pnpm" or move /Users/me/Library/pnpm/bin ahead of /opt/homebrew/bin in PATH.
+```
+
+`pnpm doctor` reports the same thing later, and `pnpm self-update` warns the same way.
+
 ## Configuring
 
 By default, the script will install the latest version of pnpm. A specific version can be installed by specifying the `PNPM_VERSION` environment variable:

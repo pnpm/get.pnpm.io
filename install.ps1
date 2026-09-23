@@ -359,3 +359,107 @@ if ($platform -ne 'win32') {
 Start-Process -FilePath $tempFile -ArgumentList "setup" -NoNewWindow -Wait -ErrorAction Continue
 
 Remove-Item $tempFileFolder -Recurse -Force
+
+# Where `pnpm setup` installs: PNPM_HOME, or pnpm's default for the platform,
+# resolved the way pnpm resolves it.
+function Get-PnpmHomeDir {
+  if ($env:PNPM_HOME) { return $env:PNPM_HOME }
+  if ($env:XDG_DATA_HOME) { return Join-Path $env:XDG_DATA_HOME 'pnpm' }
+  if ($platform -eq 'win32') {
+    if ($env:LOCALAPPDATA) { return Join-Path $env:LOCALAPPDATA 'pnpm' }
+    return Join-Path $HOME '.pnpm'
+  }
+  if ($platform -eq 'darwin') { return Join-Path $HOME 'Library/pnpm' }
+  return Join-Path $HOME '.local/share/pnpm'
+}
+
+# The directory with every symlink resolved, or the directory itself when it
+# does not exist yet.
+function Resolve-RealPath([string] $Path) {
+  try {
+    $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+    # `ResolvedTarget` follows symlinks on PowerShell 7; Windows PowerShell has no such property.
+    if ($item.PSObject.Properties['ResolvedTarget'] -and $item.ResolvedTarget) { return $item.ResolvedTarget }
+    return $item.FullName
+  } catch {
+    return $Path
+  }
+}
+
+# Whether $Dir is a directory `pnpm setup` links pnpm into: `$PNPM_HOME\bin`, or
+# `$PNPM_HOME` itself, which the v10 layout linked into directly.
+function Test-PnpmHomeBin([string] $Dir, [string] $PnpmHome) {
+  $ownDirs = @((Join-Path $PnpmHome 'bin'), $PnpmHome)
+  foreach ($own in $ownDirs) {
+    if ($Dir.TrimEnd('\', '/') -eq $own.TrimEnd('\', '/')) { return $true }
+    if ((Resolve-RealPath $Dir).TrimEnd('\', '/') -eq (Resolve-RealPath $own).TrimEnd('\', '/')) { return $true }
+  }
+  return $false
+}
+
+# How the `pnpm` at $Executable got there, as far as its location and, for a
+# shim script, its contents tell: npm, homebrew, corepack, volta, scoop, or
+# unknown.
+function Get-InstallOrigin([string] $Executable) {
+  foreach ($candidate in @((Resolve-RealPath $Executable), $Executable)) {
+    $parts = ($candidate -split '[\\/]') | ForEach-Object { $_.ToLowerInvariant() }
+    for ($i = 0; $i -lt $parts.Length; $i++) {
+      if ($parts[$i] -eq 'cellar' -and $parts[$i + 1] -eq 'pnpm') { return 'homebrew' }
+    }
+    if ($parts -contains 'corepack') { return 'corepack' }
+    if ($parts -contains '.volta') { return 'volta' }
+    if ($parts -contains 'scoop') { return 'scoop' }
+    for ($i = 0; $i -lt $parts.Length; $i++) {
+      if ($parts[$i] -eq 'node_modules' -and $parts[$i + 1] -eq 'pnpm') { return 'npm' }
+    }
+  }
+  # npm's and Corepack's shims name their target inside; a real executable is
+  # far larger than any shim.
+  try {
+    if ((Get-Item -LiteralPath $Executable).Length -le 65536) {
+      $script = Get-Content -LiteralPath $Executable -Raw
+      if ($script -match 'corepack') { return 'corepack' }
+      if ($script -match 'node_modules[\\/]pnpm[\\/]') { return 'npm' }
+    }
+  } catch {}
+  return 'unknown'
+}
+
+# Say so when the pnpm just installed is not the one PATH resolves, or the
+# success above is the last thing the person reads before `pnpm --version`
+# prints the old version again. A `pnpm` from another installer (npm,
+# Homebrew, Corepack, Volta, Scoop) that sits ahead of `$PNPM_HOME\bin` on PATH
+# keeps running, so every version this script installs looks like it never took.
+function Write-ShadowingPnpmWarning {
+  $pnpmHome = Get-PnpmHomeDir
+  $bin = Join-Path $pnpmHome 'bin'
+  $found = @(Get-Command pnpm -All -CommandType Application -ErrorAction SilentlyContinue | ForEach-Object { $_.Source })
+  if ($found.Length -eq 0) { return }
+  $executable = $found[0]
+  if (Test-PnpmHomeBin (Split-Path $executable -Parent) $pnpmHome) { return }
+  $binOnPath = $false
+  foreach ($other in ($found | Select-Object -Skip 1)) {
+    if (Test-PnpmHomeBin (Split-Path $other -Parent) $pnpmHome) { $binOnPath = $true; break }
+  }
+  $origin = Get-InstallOrigin $executable
+  $described = @{
+    npm = 'installed with npm'; homebrew = 'installed with Homebrew'; corepack = 'a Corepack shim'
+    volta = 'installed with Volta'; scoop = 'installed with Scoop'; unknown = 'not installed by pnpm'
+  }[$origin]
+  $removal = @{
+    npm = 'npm uninstall -g pnpm'; homebrew = 'brew uninstall pnpm'; corepack = 'corepack disable pnpm'
+    volta = 'volta uninstall pnpm'; scoop = 'scoop uninstall pnpm'
+  }[$origin]
+  $reorder = "move $bin ahead of $(Split-Path $executable -Parent) in PATH"
+  $fix = if ($removal) { "run `"$removal`" or $reorder" } else { $reorder }
+  if ($binOnPath) {
+    Write-Host "Warning: `"pnpm`" on PATH is $executable ($described), which comes before $bin." -ForegroundColor Yellow
+    Write-Host "Your shell keeps running that pnpm, not the one pnpm installed to $bin." -ForegroundColor Yellow
+    Write-Host "To finish switching, $fix." -ForegroundColor Yellow
+  } else {
+    Write-Host "Warning: `"pnpm`" on PATH is $executable ($described), and $bin is not on PATH yet." -ForegroundColor Yellow
+    Write-Host "Once a new shell adds it, it has to come first: $fix." -ForegroundColor Yellow
+  }
+}
+
+Write-ShadowingPnpmWarning

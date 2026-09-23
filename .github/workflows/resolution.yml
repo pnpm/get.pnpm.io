@@ -31,3 +31,5 @@ jobs:
         run: ${{ matrix.shell }} test/resolve-version.sh
       - name: Detect every built and refused target
         run: ${{ matrix.shell }} test/target.sh
+      - name: Report a pnpm from another installer ahead of the new one on PATH
+        run: ${{ matrix.shell }} test/shadowing.sh

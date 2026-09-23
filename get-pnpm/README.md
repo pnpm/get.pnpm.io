@@ -20,6 +20,11 @@ npx get-pnpm 11.20.0    # an exact version
 
 Then open a new terminal, or source the file the installer names in its output.
 
+If `pnpm --version` still prints an older version, another `pnpm` — from
+`npm install -g pnpm`, Homebrew, Corepack, or Volta — comes before `$PNPM_HOME/bin`
+on your `PATH`. The installer looks for one when it is done and says which it found
+and the command that removes it.
+
 ## How it works
 
 1. Resolves the requested version against the `pnpm` dist-tags.
