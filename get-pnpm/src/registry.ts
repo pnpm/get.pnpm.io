@@ -89,6 +89,12 @@ let restoreProxy: () => void = () => {}
 const METADATA_TIMEOUT_MS = 30_000
 const TARBALL_TIMEOUT_MS = 15 * 60_000
 
+// A reset connection or a 502 from a load balancer in front of the registry is
+// transient, and should not fail the whole install. `fetch` retries none of
+// this on its own, so it is done here.
+const MAX_ATTEMPTS = 3
+const RETRY_DELAY_MS = 500
+
 export async function fetchPackument (registry: string, pkgName: string, headers?: RequestHeaders): Promise<Packument> {
   return fetchJson<Packument>(new URL(pkgName, registry), ABBREVIATED_PACKUMENT, headers)
 }
@@ -178,7 +184,28 @@ async function fetchJson<T> (url: URL, accept: string, headers?: RequestHeaders)
   return await response.json() as T
 }
 
+/** A request failure, marked so `request` knows whether retrying it can help. */
+class RequestFailure extends Error {
+  readonly retryable: boolean
+
+  constructor (message: string, opts: { cause?: unknown, retryable: boolean }) {
+    super(message, { cause: opts.cause })
+    this.retryable = opts.retryable
+  }
+}
+
 async function request (url: URL, accept: string | undefined, timeoutMs: number, headers?: RequestHeaders): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await attemptRequest(url, accept, timeoutMs, headers)
+    } catch (err) {
+      if (attempt >= MAX_ATTEMPTS || !(err instanceof RequestFailure) || !err.retryable) throw err
+      await delay(RETRY_DELAY_MS * attempt)
+    }
+  }
+}
+
+async function attemptRequest (url: URL, accept: string | undefined, timeoutMs: number, headers?: RequestHeaders): Promise<Response> {
   let response: Response
   try {
     response = await fetch(url, {
@@ -189,13 +216,22 @@ async function request (url: URL, accept: string | undefined, timeoutMs: number,
     const reason = (err as Error).name === 'TimeoutError'
       ? `timed out after ${Math.round(timeoutMs / 1000)}s`
       : (err as Error).message
-    throw new Error(`Could not reach ${url.href}: ${reason}`, { cause: err })
+    // A connection that could not be made at all, or was reset mid-request,
+    // is exactly the kind of blip retrying is for.
+    throw new RequestFailure(`Could not reach ${url.href}: ${reason}`, { cause: err, retryable: true })
   }
   if (!response.ok) {
-    throw new Error(`Could not download ${url.href}: ${response.status} ${response.statusText}`)
+    // A 4xx means the request itself is wrong (a missing package, a bad
+    // credential) — retrying would just ask the same wrong question again. A
+    // 5xx is the server's problem, and often a transient one.
+    throw new RequestFailure(`Could not download ${url.href}: ${response.status} ${response.statusText}`, { retryable: response.status >= 500 })
   }
   if (response.body == null) {
-    throw new Error(`Empty response from ${url.href}`)
+    throw new RequestFailure(`Empty response from ${url.href}`, { retryable: true })
   }
   return response
+}
+
+async function delay (ms: number): Promise<void> {
+  await new Promise<void>((resolve) => { setTimeout(resolve, ms) })
 }
