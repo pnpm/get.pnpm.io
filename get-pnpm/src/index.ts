@@ -4,8 +4,9 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { extractTarball } from './extractTarball.js'
+import { registryConfigFromEnv } from './npmConfig.js'
 import { isMusl, platformPackageName } from './platformPackageName.js'
-import { downloadTarball, fetchPackument, fetchVersionMeta, registryFromEnv, useProxyFromEnv } from './registry.js'
+import { downloadTarball, fetchPackument, fetchVersionMeta, type RequestHeaders, useProxyFromEnv } from './registry.js'
 import { majorVersion, resolveVersion } from './resolveVersion.js'
 import { findShadowingPnpm, pnpmHomeDir, renderShadowingPnpmWarning } from './shadowingPnpm.js'
 import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
@@ -45,6 +46,9 @@ Environment variables:
   PNPM_VERSION           Version to install when no argument is given.
   PNPM_HOME              Directory to install pnpm into.
   npm_config_registry    Registry to download pnpm from.
+  npm_config_*:_authToken
+                         Registry-scoped bearer token. Project, user, and
+                         global .npmrc auth tokens are also read.
   HTTPS_PROXY            Proxy to download through (HTTP_PROXY for an http://
                          registry); NO_PROXY names hosts to reach directly.
                          Node 24.14 or later.
@@ -65,9 +69,10 @@ export async function runCli (argv: string[]): Promise<number> {
   if (positional.length > 1) {
     throw new Error(`Expected at most one version, got ${positional.length}.\n\n${USAGE}`)
   }
+  const registryConfig = registryConfigFromEnv()
   return installPnpm({
     versionSpec: positional[0] ?? process.env.PNPM_VERSION ?? 'latest',
-    registry: registryFromEnv(),
+    ...registryConfig,
   })
 }
 
@@ -88,6 +93,7 @@ export async function installPnpm (
   opts: {
     versionSpec: string
     registry: string
+    headers?: RequestHeaders
     keys?: readonly SigningKey[]
   }
 ): Promise<number> {
@@ -156,6 +162,7 @@ export async function downloadPnpm (
     versionSpec: string
     registry: string
     dest: string
+    headers?: RequestHeaders
     keys?: readonly SigningKey[]
   }
 ): Promise<{ version: string, binPath: string }> {
@@ -172,10 +179,11 @@ async function fetchPnpm (
     versionSpec: string
     registry: string
     dest: string
+    headers?: RequestHeaders
     keys?: readonly SigningKey[]
   }
 ): Promise<{ version: string, binPath: string }> {
-  const packument = await fetchPackument(opts.registry, CLI_PKG_NAME)
+  const packument = await fetchPackument(opts.registry, CLI_PKG_NAME, opts.headers)
   const version = resolveVersion(packument, opts.versionSpec)
   const major = majorVersion(version)
   const platformPkgName = platformPackageName({
@@ -190,7 +198,7 @@ async function fetchPnpm (
   try {
     console.log(`==> Downloading pnpm ${version}`)
     const executable = process.platform === 'win32' ? 'pnpm.exe' : 'pnpm'
-    const fetchPackage = verifiedPackageFetcher({ dir: dest, registry: opts.registry, version, keys: opts.keys })
+    const fetchPackage = verifiedPackageFetcher({ dir: dest, registry: opts.registry, version, headers: opts.headers, keys: opts.keys })
 
     // Settled, not `all`: a rejection there would leave the other fetch writing
     // into the directory the `finally` below is about to remove.
@@ -247,10 +255,16 @@ function writeManifest (
 
 /** Downloads packages of one version into one directory, verifying each. */
 function verifiedPackageFetcher (
-  opts: { dir: string, registry: string, version: string, keys?: readonly SigningKey[] }
+  opts: {
+    dir: string
+    registry: string
+    version: string
+    headers?: RequestHeaders
+    keys?: readonly SigningKey[]
+  }
 ): (pkgName: string) => Promise<{ dir: string }> {
   return async function fetchPackage (pkgName: string): Promise<{ dir: string }> {
-    const meta = await fetchVersionMeta(opts.registry, pkgName, opts.version)
+    const meta = await fetchVersionMeta(opts.registry, pkgName, opts.version, opts.headers)
     if (!meta.dist.integrity) {
       throw new Error(`The npm registry published no checksum for ${pkgName}@${opts.version}, so it cannot be verified.`)
     }
@@ -266,7 +280,7 @@ function verifiedPackageFetcher (
     const unpackDir = path.join(opts.dir, UNPACK_DIR, pkgName.replaceAll('/', '-'))
     const tarball = `${unpackDir}.tgz`
     fs.mkdirSync(path.dirname(tarball), { recursive: true })
-    await downloadTarball(meta, tarball, { registry: opts.registry })
+    await downloadTarball(meta, tarball, { registry: opts.registry, headers: opts.headers })
     extractTarball(tarball, unpackDir)
     fs.rmSync(tarball)
     return { dir: path.join(unpackDir, 'package') }
