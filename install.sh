@@ -389,6 +389,17 @@ download_and_install() {
 
   assert_target_is_built "$platform" "$arch" "$major_version"
 
+  if [ "$platform-$arch$libc_suffix" = 'linux-arm64-musl' ] && [ "$major_version" -eq 11 ]; then
+    abort \
+      "pnpm v${version} does not provide a working binary for Linux ARM64 musl (linux-arm64-musl)." \
+      "" \
+      "Install the JavaScript package using your system Node.js:" \
+      "  npm install -g pnpm@${version}" \
+      "" \
+      "Or install pnpm 12, which provides a working binary:" \
+      "  PNPM_VERSION=12 sh -c \"\$(curl -fsSL https://get.pnpm.io/install.sh)\""
+  fi
+
   # Intel macOS isn't supported on pnpm v11 only: the SEA binary produced
   # by Node.js for darwin-x64 segfaults at startup because of an upstream
   # Node.js bug the Node.js team has decided not to fix (Intel macOS is
