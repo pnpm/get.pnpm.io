@@ -17,6 +17,11 @@ interface RegistryToken {
   token: string
 }
 
+interface NpmrcCandidate {
+  ignoreUnreadable: boolean
+  path: string
+}
+
 export interface RegistryConfig {
   authPath?: string
   headers?: RequestHeaders
@@ -32,7 +37,8 @@ export function registryConfigFromEnv (opts: RegistryConfigOptions = {}): Regist
   const registry = embedded.registry
   const token = mostSpecificToken([
     registryTokenFromEnv(registry, env),
-    registryTokenFromNpmrc(registry, projectNpmrc(opts.cwd ?? process.cwd(), env), env),
+    ...projectNpmrcs(opts.cwd ?? process.cwd(), env)
+      .map((candidate) => registryTokenFromNpmrc(registry, candidate, env)),
     registryTokenFromNpmrc(registry, userNpmrc(opts, env), env),
     registryTokenFromNpmrc(registry, globalNpmrc(opts, env), env),
   ])
@@ -74,14 +80,15 @@ function registryTokenFromEnv (registry: string, env: NodeJS.ProcessEnv): Regist
 
 function registryTokenFromNpmrc (
   registry: string,
-  npmrcPath: string,
+  npmrc: NpmrcCandidate,
   env: NodeJS.ProcessEnv
 ): RegistryToken | undefined {
   let text: string
   try {
-    text = fs.readFileSync(npmrcPath, 'utf8')
+    text = fs.readFileSync(npmrc.path, 'utf8')
   } catch (err) {
-    if (isIgnorableNpmrcReadError(err)) return undefined
+    if (isErrno(err, 'ENOENT')) return undefined
+    if (npmrc.ignoreUnreadable && isUnreadableNpmrcError(err)) return undefined
     throw err
   }
 
@@ -149,9 +156,17 @@ function authTokenScope (key: string, protocol: string): { host: string, pathnam
   }
 }
 
-function projectNpmrc (cwd: string, env: NodeJS.ProcessEnv): string {
+function projectNpmrcs (cwd: string, env: NodeJS.ProcessEnv): NpmrcCandidate[] {
   const configured = env.npm_config_local_prefix ?? env.NPM_CONFIG_LOCAL_PREFIX
-  return path.join(configured ?? findProjectRoot(cwd), '.npmrc')
+  if (configured != null) {
+    return [{ path: path.join(configured, '.npmrc'), ignoreUnreadable: false }]
+  }
+
+  const current = path.resolve(cwd)
+  const root = findProjectRoot(current)
+  const paths = [path.join(current, '.npmrc')]
+  if (root !== current) paths.push(path.join(root, '.npmrc'))
+  return paths.map((npmrcPath) => ({ path: npmrcPath, ignoreUnreadable: true }))
 }
 
 function findProjectRoot (cwd: string): string {
@@ -165,15 +180,16 @@ function findProjectRoot (cwd: string): string {
   }
 }
 
-function userNpmrc (opts: RegistryConfigOptions, env: NodeJS.ProcessEnv): string {
-  return env.npm_config_userconfig ??
-    env.NPM_CONFIG_USERCONFIG ??
-    path.join(npmHomeDir(opts, env), '.npmrc')
+function userNpmrc (opts: RegistryConfigOptions, env: NodeJS.ProcessEnv): NpmrcCandidate {
+  const configured = env.npm_config_userconfig ?? env.NPM_CONFIG_USERCONFIG
+  return configured != null
+    ? { path: configured, ignoreUnreadable: false }
+    : { path: path.join(npmHomeDir(opts, env), '.npmrc'), ignoreUnreadable: true }
 }
 
-function globalNpmrc (opts: RegistryConfigOptions, env: NodeJS.ProcessEnv): string {
+function globalNpmrc (opts: RegistryConfigOptions, env: NodeJS.ProcessEnv): NpmrcCandidate {
   const configured = env.npm_config_globalconfig ?? env.NPM_CONFIG_GLOBALCONFIG
-  if (configured != null) return configured
+  if (configured != null) return { path: configured, ignoreUnreadable: false }
 
   const platform = opts.platform ?? process.platform
   const homeDir = npmHomeDir(opts, env)
@@ -182,7 +198,7 @@ function globalNpmrc (opts: RegistryConfigOptions, env: NodeJS.ProcessEnv): stri
     (platform === 'win32'
       ? path.join(env.APPDATA ?? path.join(homeDir, 'AppData', 'Roaming'), 'npm')
       : path.dirname(path.dirname(opts.execPath ?? process.execPath)))
-  return path.join(prefix, 'etc', 'npmrc')
+  return { path: path.join(prefix, 'etc', 'npmrc'), ignoreUnreadable: true }
 }
 
 function npmHomeDir (opts: RegistryConfigOptions, env: NodeJS.ProcessEnv): string {
@@ -216,8 +232,8 @@ function expandEnv (value: string, env: NodeJS.ProcessEnv): string | undefined {
   return missing ? undefined : expanded
 }
 
-function isIgnorableNpmrcReadError (err: unknown): boolean {
-  return ['EACCES', 'EISDIR', 'ENOENT', 'EPERM'].some((code) => isErrno(err, code))
+function isUnreadableNpmrcError (err: unknown): boolean {
+  return ['EACCES', 'EISDIR', 'EPERM'].some((code) => isErrno(err, code))
 }
 
 function isErrno (err: unknown, code: string): err is NodeJS.ErrnoException {

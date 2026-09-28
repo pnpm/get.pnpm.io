@@ -143,7 +143,6 @@ export interface TarballOptions {
   registry?: string
   /** Credentials for `registry`, withheld from any other origin. */
   headers?: RequestHeaders
-  /** Optional path scope for `headers`, such as an npmrc token scope. */
   headersPath?: string
 }
 
