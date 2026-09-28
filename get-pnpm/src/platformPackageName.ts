@@ -1,6 +1,8 @@
 export interface Target {
   /** Major version of the pnpm release being installed. */
   major: number
+  /** Exact version, when known, for alternative installation instructions. */
+  version?: string
   /** `process.platform` of the host. */
   platform: string
   /** `process.arch` of the host. */
@@ -28,9 +30,9 @@ const V12_ONLY_TARGETS = new Set([
  *
  * @throws if pnpm publishes no binary for the host — because the host is not
  * built for at all, because the binary arrived in v12 and an older major was
- * asked for, or because of the v11-only Intel macOS gap.
+ * asked for, or because of the v11-only Intel macOS and arm64 musl Linux gaps.
  */
-export function platformPackageName ({ major, platform, arch, musl }: Target): string {
+export function platformPackageName ({ major, version, platform, arch, musl }: Target): string {
   const target = `${platform}-${arch}`
   if (V12_ONLY_TARGETS.has(target)) {
     if (major >= 12) return `@pnpm/exe.${target}`
@@ -53,6 +55,15 @@ Install pnpm a different way instead:
 More context: https://github.com/pnpm/pnpm/issues/11423`)
   }
   const linuxMusl = platform === 'linux' && musl
+  if (linuxMusl && arch === 'arm64' && major === 11) {
+    throw new Error(`pnpm v11 does not provide a working binary for arm64 musl Linux (linux-arm64-musl).
+
+Install pnpm a different way instead:
+  npm install -g pnpm@${version ?? major}    # uses your system Node.js
+  npx get-pnpm 12        # pnpm v12 ships an arm64 musl Linux binary
+
+More context: https://github.com/pnpm/pnpm/issues/10443`)
+  }
   if (major >= 12) {
     return `@pnpm/exe.${platform}-${arch}${linuxMusl ? '-musl' : ''}`
   }
