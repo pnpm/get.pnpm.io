@@ -162,6 +162,24 @@ test('prefers a more specific token across npmrc precedence layers', () => {
   assert.equal(config.authPath, '/npm/')
 })
 
+test('prefers a cwd npmrc before the discovered package-root npmrc at the same scope', () => {
+  const root = tempDir()
+  const project = path.join(root, 'project')
+  const cwd = path.join(project, 'tools')
+  fs.mkdirSync(cwd, { recursive: true })
+  fs.writeFileSync(path.join(project, 'package.json'), '{}\n')
+  fs.writeFileSync(path.join(project, '.npmrc'), '//registry.example.test/:_authToken=root-token\n')
+  fs.writeFileSync(path.join(cwd, '.npmrc'), '//registry.example.test/:_authToken=cwd-token\n')
+
+  const config = registryConfigFromEnv({
+    cwd,
+    env: { npm_config_registry: 'https://registry.example.test/' },
+    homeDir: path.join(root, 'missing-home'),
+  })
+
+  assert.equal(config.headers?.authorization, 'Bearer cwd-token')
+})
+
 test('finds the project npmrc from a project subdirectory', () => {
   const root = tempDir()
   const project = path.join(root, 'project')
@@ -179,19 +197,30 @@ test('finds the project npmrc from a project subdirectory', () => {
   assert.equal(config.headers?.authorization, 'Bearer project-token')
 })
 
-test('ignores an unreadable npmrc candidate', () => {
+test('ignores an unreadable default npmrc candidate', () => {
   const root = tempDir()
+  fs.mkdirSync(path.join(root, '.npmrc'))
 
   const config = registryConfigFromEnv({
+    cwd: path.join(root, 'project'),
+    env: { npm_config_registry: 'https://registry.example.test/' },
+    homeDir: root,
+  })
+
+  assert.deepEqual(config, { registry: 'https://registry.example.test/' })
+})
+
+test('reports an unreadable explicitly configured npmrc', () => {
+  const root = tempDir()
+
+  assert.throws(() => registryConfigFromEnv({
     cwd: root,
     env: {
       npm_config_registry: 'https://registry.example.test/',
       npm_config_userconfig: root,
     },
     homeDir: root,
-  })
-
-  assert.deepEqual(config, { registry: 'https://registry.example.test/' })
+  }))
 })
 
 test('does not use a token scoped to another registry', () => {
