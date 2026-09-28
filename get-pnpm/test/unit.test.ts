@@ -90,6 +90,19 @@ describe('platformPackageName', () => {
     assert.throws(() => platformPackageName(target({ platform: 'darwin', arch: 'x64' })), /Intel macOS/s)
     assert.equal(platformPackageName(target({ major: 10, platform: 'darwin', arch: 'x64' })), '@pnpm/macos-x64')
   })
+
+  test('points arm64 musl users away from v11, which has no working binary', () => {
+    assert.throws(() => platformPackageName(target({ arch: 'arm64', musl: true, version: '11.20.0' })), (err: Error) => {
+      assert.match(err.message, /pnpm v11.*arm64 musl Linux/s)
+      assert.match(err.message, /npm install -g pnpm@11\.20\.0/)
+      assert.match(err.message, /npx get-pnpm 12/)
+      return true
+    })
+    assert.throws(() => platformPackageName(target({ arch: 'arm64', musl: true })), /npm install -g pnpm@11\b/)
+    assert.equal(platformPackageName(target({ major: 10, arch: 'arm64', musl: true })), '@pnpm/linuxstatic-arm64')
+    assert.equal(platformPackageName(target({ major: 12, arch: 'arm64', musl: true })), '@pnpm/exe.linux-arm64-musl')
+    assert.equal(platformPackageName(target({ arch: 'arm64', musl: false })), '@pnpm/linux-arm64')
+  })
 })
 
 describe('verifyRegistrySignature', () => {

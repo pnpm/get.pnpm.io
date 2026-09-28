@@ -74,6 +74,44 @@ expect_package() {
   [ "$actual" = "$4" ] || fail "$1-$2 on $3" "$4" "$actual"
 }
 
+expect_linux_install_target() {
+  requested_version="$1"
+  mock_arch="$2"
+  libc="$3"
+  expected="$4"
+  download_log="$work/download"
+  rm -f "$download_log"
+  result=0
+  actual="$(
+    # shellcheck disable=SC2329
+    detect_platform() { printf 'linux'; }
+    # shellcheck disable=SC2329
+    detect_arch() { printf '%s' "$mock_arch"; }
+    # shellcheck disable=SC2329
+    is_glibc_compatible() { [ "$libc" = 'glibc' ]; }
+    # Stop at the first binary request, without downloading or executing it.
+    # shellcheck disable=SC2329
+    download() { printf '%s' "$1" > "$download_log"; return 1; }
+    # shellcheck disable=SC2329
+    fetch_verified_package() { printf '%s' "$1" > "$download_log"; return 1; }
+    PNPM_VERSION="$requested_version" download_and_install
+  )" || result=$?
+
+  if [ "$expected" = 'REFUSED' ]; then
+    [ "$result" -eq 1 ] || fail "$requested_version on linux-$mock_arch-$libc" 'exit 1' "$result"
+    [ ! -e "$download_log" ] || fail "$requested_version on linux-$mock_arch-$libc" 'no binary request' "$(cat "$download_log")"
+    for message in 'linux-arm64-musl' "npm install -g pnpm@$requested_version" 'PNPM_VERSION=12'; do
+      case "$actual" in
+        *"$message"*) ;;
+        *) fail "$requested_version refusal" "mentions $message" "$actual" ;;
+      esac
+    done
+  else
+    attempted="$(cat "$download_log" 2>/dev/null || true)"
+    [ "$attempted" = "$expected" ] || fail "$requested_version on linux-$mock_arch-$libc" "$expected" "$attempted"
+  fi
+}
+
 expect_arch x86_64 x64
 expect_arch aarch64 arm64
 expect_arch riscv64 riscv64
@@ -125,6 +163,13 @@ for arch in x64 arm64; do
   expect_package linux "$arch" glibc "@pnpm/exe.linux-$arch"
   expect_package linux "$arch" musl "@pnpm/exe.linux-$arch-musl"
 done
+
+expect_linux_install_target 11.27.1 arm64 musl REFUSED
+expect_linux_install_target 11.28.1 arm64 musl REFUSED
+expect_linux_install_target 11.0.0-rc.1 arm64 musl REFUSED
+expect_linux_install_target 10.34.5 arm64 musl 'https://github.com/pnpm/pnpm/releases/download/v10.34.5/pnpm-linuxstatic-arm64'
+expect_linux_install_target 11.28.1 arm64 glibc 'https://github.com/pnpm/pnpm/releases/download/v11.28.1/pnpm-linux-arm64.tar.gz'
+expect_linux_install_target 11.28.1 x64 musl 'https://github.com/pnpm/pnpm/releases/download/v11.28.1/pnpm-linux-x64-musl.tar.gz'
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures case(s) failed"
