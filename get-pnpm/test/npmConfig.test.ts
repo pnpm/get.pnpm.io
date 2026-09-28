@@ -24,6 +24,7 @@ test('reads a registry-scoped auth token from npm config environment variables',
 
   assert.deepEqual(config, {
     registry: 'https://registry.example.test/npm/',
+    authPath: '/npm/',
     headers: { authorization: 'Bearer env-token' },
   })
 })
@@ -37,6 +38,7 @@ test('converts credentials in the configured registry URL to Basic auth', () => 
 
   assert.deepEqual(config, {
     registry: 'https://registry.example.test/npm/',
+    authPath: '/npm/',
     headers: {
       authorization: `Basic ${Buffer.from('user:p@ss').toString('base64')}`,
     },
@@ -119,8 +121,77 @@ test('uses the most specific registry path token and expands environment variabl
 
   assert.deepEqual(config, {
     registry: 'https://registry.example.test/npm/private/',
+    authPath: '/npm/',
     headers: { authorization: 'Bearer scoped-token' },
   })
+})
+
+test('normalizes default ports using the configured registry protocol', () => {
+  const config = registryConfigFromEnv({
+    env: {
+      npm_config_registry: 'http://registry.example.test:80/npm/',
+      'npm_config_//registry.example.test:80/npm/:_authToken': 'http-token',
+    },
+  })
+
+  assert.deepEqual(config, {
+    registry: 'http://registry.example.test/npm/',
+    authPath: '/npm/',
+    headers: { authorization: 'Bearer http-token' },
+  })
+})
+
+test('prefers a more specific token across npmrc precedence layers', () => {
+  const root = tempDir()
+  const project = path.join(root, 'project')
+  const cwd = path.join(project, 'src')
+  const home = path.join(root, 'home')
+  fs.mkdirSync(cwd, { recursive: true })
+  fs.mkdirSync(home)
+  fs.writeFileSync(path.join(project, 'package.json'), '{}\n')
+  fs.writeFileSync(path.join(project, '.npmrc'), '//registry.example.test/:_authToken=project-wide\n')
+  fs.writeFileSync(path.join(home, '.npmrc'), '//registry.example.test/npm/:_authToken=user-scoped\n')
+
+  const config = registryConfigFromEnv({
+    cwd,
+    env: { npm_config_registry: 'https://registry.example.test/npm/private/' },
+    homeDir: home,
+  })
+
+  assert.equal(config.headers?.authorization, 'Bearer user-scoped')
+  assert.equal(config.authPath, '/npm/')
+})
+
+test('finds the project npmrc from a project subdirectory', () => {
+  const root = tempDir()
+  const project = path.join(root, 'project')
+  const cwd = path.join(project, 'src', 'nested')
+  fs.mkdirSync(cwd, { recursive: true })
+  fs.writeFileSync(path.join(project, 'package.json'), '{}\n')
+  fs.writeFileSync(path.join(project, '.npmrc'), '//registry.example.test/:_authToken=project-token\n')
+
+  const config = registryConfigFromEnv({
+    cwd,
+    env: { npm_config_registry: 'https://registry.example.test/' },
+    homeDir: path.join(root, 'missing-home'),
+  })
+
+  assert.equal(config.headers?.authorization, 'Bearer project-token')
+})
+
+test('ignores an unreadable npmrc candidate', () => {
+  const root = tempDir()
+
+  const config = registryConfigFromEnv({
+    cwd: root,
+    env: {
+      npm_config_registry: 'https://registry.example.test/',
+      npm_config_userconfig: root,
+    },
+    homeDir: root,
+  })
+
+  assert.deepEqual(config, { registry: 'https://registry.example.test/' })
 })
 
 test('does not use a token scoped to another registry', () => {

@@ -95,6 +95,7 @@ export async function installPnpm (
   opts: {
     versionSpec: string
     registry: string
+    authPath?: string
     headers?: RequestHeaders
     keys?: readonly SigningKey[]
   }
@@ -167,6 +168,7 @@ export async function downloadPnpm (
     versionSpec: string
     registry: string
     dest: string
+    authPath?: string
     headers?: RequestHeaders
     keys?: readonly SigningKey[]
   }
@@ -184,6 +186,7 @@ async function fetchPnpm (
     versionSpec: string
     registry: string
     dest: string
+    authPath?: string
     headers?: RequestHeaders
     keys?: readonly SigningKey[]
   }
@@ -203,7 +206,14 @@ async function fetchPnpm (
   try {
     console.log(`==> Downloading pnpm ${version}`)
     const executable = process.platform === 'win32' ? 'pnpm.exe' : 'pnpm'
-    const fetchPackage = verifiedPackageFetcher({ dir: dest, registry: opts.registry, version, headers: opts.headers, keys: opts.keys })
+    const fetchPackage = verifiedPackageFetcher({
+      dir: dest,
+      registry: opts.registry,
+      version,
+      authPath: opts.authPath,
+      headers: opts.headers,
+      keys: opts.keys,
+    })
 
     // Settled, not `all`: a rejection there would leave the other fetch writing
     // into the directory the `finally` below is about to remove.
@@ -264,6 +274,7 @@ function verifiedPackageFetcher (
     dir: string
     registry: string
     version: string
+    authPath?: string
     headers?: RequestHeaders
     keys?: readonly SigningKey[]
   }
@@ -285,7 +296,11 @@ function verifiedPackageFetcher (
     const unpackDir = path.join(opts.dir, UNPACK_DIR, pkgName.replaceAll('/', '-'))
     const tarball = `${unpackDir}.tgz`
     fs.mkdirSync(path.dirname(tarball), { recursive: true })
-    await downloadTarball(meta, tarball, { registry: opts.registry, headers: opts.headers })
+    await downloadTarball(meta, tarball, {
+      registry: opts.registry,
+      headers: opts.headers,
+      headersPath: opts.authPath,
+    })
     extractTarball(tarball, unpackDir)
     fs.rmSync(tarball)
     return { dir: path.join(unpackDir, 'package') }
