@@ -132,6 +132,8 @@ export interface TarballOptions {
   registry?: string
   /** Credentials for `registry`, withheld from any other origin. */
   headers?: RequestHeaders
+  /** Optional path scope for `headers`, such as an npmrc token scope. */
+  headersPath?: string
 }
 
 /**
@@ -150,7 +152,11 @@ export function tarballUrl (meta: VersionMeta, registry?: string): URL {
 
 function headersFor (url: URL, opts: TarballOptions): RequestHeaders | undefined {
   if (opts.headers == null || opts.registry == null) return undefined
-  return url.origin === new URL(opts.registry).origin ? opts.headers : undefined
+  const registry = new URL(normalizeRegistry(opts.registry))
+  if (url.origin !== registry.origin) return undefined
+  if (opts.headersPath == null) return opts.headers
+  const scope = opts.headersPath.endsWith('/') ? opts.headersPath : `${opts.headersPath}/`
+  return url.pathname.startsWith(scope) ? opts.headers : undefined
 }
 
 /**

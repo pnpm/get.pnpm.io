@@ -12,7 +12,13 @@ interface RegistryConfigOptions {
   platform?: NodeJS.Platform
 }
 
+interface RegistryToken {
+  pathname: string
+  token: string
+}
+
 export interface RegistryConfig {
+  authPath?: string
   headers?: RequestHeaders
   registry: string
 }
@@ -24,14 +30,20 @@ export function registryConfigFromEnv (opts: RegistryConfigOptions = {}): Regist
   if (embedded.headers != null) return embedded
 
   const registry = embedded.registry
-  const token = registryTokenFromEnv(registry, env) ??
-    registryTokenFromNpmrc(registry, projectNpmrc(opts.cwd ?? process.cwd(), env), env) ??
-    registryTokenFromNpmrc(registry, userNpmrc(opts, env), env) ??
-    registryTokenFromNpmrc(registry, globalNpmrc(opts, env), env)
+  const token = mostSpecificToken([
+    registryTokenFromEnv(registry, env),
+    registryTokenFromNpmrc(registry, projectNpmrc(opts.cwd ?? process.cwd(), env), env),
+    registryTokenFromNpmrc(registry, userNpmrc(opts, env), env),
+    registryTokenFromNpmrc(registry, globalNpmrc(opts, env), env),
+  ])
 
   return token == null
     ? { registry }
-    : { registry, headers: { authorization: `Bearer ${token}` } }
+    : {
+        registry,
+        authPath: token.pathname,
+        headers: { authorization: `Bearer ${token.token}` },
+      }
 }
 
 function registryAndEmbeddedAuth (rawRegistry: string): RegistryConfig {
@@ -44,13 +56,14 @@ function registryAndEmbeddedAuth (rawRegistry: string): RegistryConfig {
   url.password = ''
   return {
     registry: url.href,
+    authPath: normalizedPath(url.pathname),
     headers: {
       authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`,
     },
   }
 }
 
-function registryTokenFromEnv (registry: string, env: NodeJS.ProcessEnv): string | undefined {
+function registryTokenFromEnv (registry: string, env: NodeJS.ProcessEnv): RegistryToken | undefined {
   const entries: Array<[string, string]> = []
   for (const [name, value] of Object.entries(env)) {
     if (value == null || !name.toLowerCase().startsWith('npm_config_')) continue
@@ -63,12 +76,12 @@ function registryTokenFromNpmrc (
   registry: string,
   npmrcPath: string,
   env: NodeJS.ProcessEnv
-): string | undefined {
+): RegistryToken | undefined {
   let text: string
   try {
     text = fs.readFileSync(npmrcPath, 'utf8')
   } catch (err) {
-    if (isErrno(err, 'ENOENT')) return undefined
+    if (isIgnorableNpmrcReadError(err)) return undefined
     throw err
   }
 
@@ -86,30 +99,39 @@ function registryTokenFromNpmrc (
   return tokenForRegistry(registry, entries)
 }
 
-function tokenForRegistry (registry: string, entries: Array<[string, string]>): string | undefined {
+function tokenForRegistry (registry: string, entries: Array<[string, string]>): RegistryToken | undefined {
   const registryUrl = new URL(registry)
-  let best: { pathLength: number, position: number, token: string } | undefined
+  let best: { pathname: string, position: number, token: string } | undefined
 
   entries.forEach(([key, token], position) => {
     if (token === '') return
-    const scope = authTokenScope(key)
+    const scope = authTokenScope(key, registryUrl.protocol)
     if (scope == null) return
     if (scope.host !== registryUrl.host.toLowerCase()) return
     if (!registryUrl.pathname.startsWith(scope.pathname)) return
 
     if (
       best == null ||
-      scope.pathname.length > best.pathLength ||
-      (scope.pathname.length === best.pathLength && position > best.position)
+      scope.pathname.length > best.pathname.length ||
+      (scope.pathname.length === best.pathname.length && position > best.position)
     ) {
-      best = { pathLength: scope.pathname.length, position, token }
+      best = { pathname: scope.pathname, position, token }
     }
   })
 
-  return best?.token
+  return best == null ? undefined : { pathname: best.pathname, token: best.token }
 }
 
-function authTokenScope (key: string): { host: string, pathname: string } | undefined {
+function mostSpecificToken (candidates: Array<RegistryToken | undefined>): RegistryToken | undefined {
+  let best: RegistryToken | undefined
+  for (const candidate of candidates) {
+    if (candidate == null) continue
+    if (best == null || candidate.pathname.length > best.pathname.length) best = candidate
+  }
+  return best
+}
+
+function authTokenScope (key: string, protocol: string): { host: string, pathname: string } | undefined {
   const suffix = ':_authtoken'
   const lower = key.toLowerCase()
   if (!lower.endsWith(suffix)) return undefined
@@ -117,10 +139,10 @@ function authTokenScope (key: string): { host: string, pathname: string } | unde
   if (!rawScope.startsWith('//')) return undefined
 
   try {
-    const url = new URL(`https:${rawScope}`)
+    const url = new URL(`${protocol}${rawScope}`)
     return {
       host: url.host.toLowerCase(),
-      pathname: url.pathname.endsWith('/') ? url.pathname : `${url.pathname}/`,
+      pathname: normalizedPath(url.pathname),
     }
   } catch {
     return undefined
@@ -128,10 +150,19 @@ function authTokenScope (key: string): { host: string, pathname: string } | unde
 }
 
 function projectNpmrc (cwd: string, env: NodeJS.ProcessEnv): string {
-  return path.join(
-    env.npm_config_local_prefix ?? env.NPM_CONFIG_LOCAL_PREFIX ?? cwd,
-    '.npmrc'
-  )
+  const configured = env.npm_config_local_prefix ?? env.NPM_CONFIG_LOCAL_PREFIX
+  return path.join(configured ?? findProjectRoot(cwd), '.npmrc')
+}
+
+function findProjectRoot (cwd: string): string {
+  const start = path.resolve(cwd)
+  let current = start
+  while (true) {
+    if (fs.existsSync(path.join(current, 'package.json'))) return current
+    const parent = path.dirname(current)
+    if (parent === current) return start
+    current = parent
+  }
 }
 
 function userNpmrc (opts: RegistryConfigOptions, env: NodeJS.ProcessEnv): string {
@@ -161,6 +192,10 @@ function npmHomeDir (opts: RegistryConfigOptions, env: NodeJS.ProcessEnv): strin
   return env.HOME ?? os.homedir()
 }
 
+function normalizedPath (pathname: string): string {
+  return pathname.endsWith('/') ? pathname : `${pathname}/`
+}
+
 function stripQuotes (value: string): string {
   if (value.length < 2) return value
   const first = value[0]
@@ -179,6 +214,10 @@ function expandEnv (value: string, env: NodeJS.ProcessEnv): string | undefined {
     return resolved
   })
   return missing ? undefined : expanded
+}
+
+function isIgnorableNpmrcReadError (err: unknown): boolean {
+  return ['EACCES', 'EISDIR', 'ENOENT', 'EPERM'].some((code) => isErrno(err, code))
 }
 
 function isErrno (err: unknown, code: string): err is NodeJS.ErrnoException {

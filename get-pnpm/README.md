@@ -50,7 +50,7 @@ registry=https://registry.example.com/npm/
 
 An equivalent `npm_config_//registry.example.com/npm/:_authToken` environment entry is also accepted when the environment can represent that name. Credentials embedded in `npm_config_registry` are converted to HTTP Basic authentication and removed from the request URL.
 
-Authentication is sent only to the configured registry origin. If registry metadata names a tarball on another origin, the credentials are not forwarded there.
+Authentication from npm config is sent only to the configured registry origin and the selected token's path scope. If registry metadata names a tarball on another origin or outside that scope, the credentials are not forwarded there. Prefer HTTPS for authenticated registries; configuring an HTTP registry sends its credentials over that HTTP connection.
 
 ## Environment variables
 
@@ -76,7 +76,7 @@ const { version, binPath } = await downloadPnpm({
   versionSpec: 'next-12',
   registry: 'https://registry.npmjs.org/',
   dest: '/opt/pnpm',
-  headers: { authorization: 'Bearer …' }, // optional
+  headers: { authorization: 'Bearer …' },
 })
 ```
 
@@ -95,7 +95,7 @@ await downloadPnpmExecutable({
   version: '12.0.0',
   registry: 'https://registry.npmjs.org/',
   destPath: '/opt/pnpm/pnpm',
-  headers: { authorization: 'Bearer …' }, // optional; never sent off the registry
+  headers: { authorization: 'Bearer …' },
 })
 ```
 
