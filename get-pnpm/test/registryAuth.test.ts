@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
-import { downloadTarball, type VersionMeta } from '../lib/registry.js'
+import { downloadTarball, fetchVersionMeta, type VersionMeta } from '../lib/registry.js'
 
 describe('registry credential scope', () => {
   let server: http.Server
@@ -20,6 +20,26 @@ describe('registry credential scope', () => {
     authorizations = []
     server = http.createServer((req, res) => {
       authorizations.push(req.headers.authorization)
+      if (req.url === '/npm/redirect-out.tgz') {
+        res.writeHead(302, { location: '/other/pkg.tgz' })
+        res.end()
+        return
+      }
+      if (req.url === '/npm/redirect-in.tgz') {
+        res.writeHead(302, { location: '/npm/final.tgz' })
+        res.end()
+        return
+      }
+      if (req.url === '/npm/meta-redirect/1.0.0') {
+        res.writeHead(302, { location: '/other/meta.json' })
+        res.end()
+        return
+      }
+      if (req.url === '/other/meta.json') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ dist: { tarball: `${origin}/npm/pkg.tgz`, integrity } }))
+        return
+      }
       res.writeHead(200, { 'content-type': 'application/octet-stream' })
       res.end(body)
     })
@@ -52,6 +72,41 @@ describe('registry credential scope', () => {
     })
 
     assert.deepEqual(authorizations, [undefined])
+  })
+
+  test('drops scoped credentials when a tarball redirect leaves the configured path', async () => {
+    authorizations = []
+    await downloadTarball(meta(`${origin}/npm/redirect-out.tgz`), path.join(dir, 'redirect-out.tgz'), {
+      registry: `${origin}/npm/`,
+      headers: { authorization: 'Bearer scoped-token' },
+      headersPath: '/npm/',
+    })
+
+    assert.deepEqual(authorizations, ['Bearer scoped-token', undefined])
+  })
+
+  test('keeps scoped credentials when a tarball redirect stays in the configured path', async () => {
+    authorizations = []
+    await downloadTarball(meta(`${origin}/npm/redirect-in.tgz`), path.join(dir, 'redirect-in.tgz'), {
+      registry: `${origin}/npm/`,
+      headers: { authorization: 'Bearer scoped-token' },
+      headersPath: '/npm/',
+    })
+
+    assert.deepEqual(authorizations, ['Bearer scoped-token', 'Bearer scoped-token'])
+  })
+
+  test('drops scoped credentials when a metadata redirect leaves the configured path', async () => {
+    authorizations = []
+    await fetchVersionMeta(
+      `${origin}/npm/`,
+      'meta-redirect',
+      '1.0.0',
+      { authorization: 'Bearer scoped-token' },
+      '/npm/'
+    )
+
+    assert.deepEqual(authorizations, ['Bearer scoped-token', undefined])
   })
 
   function meta (tarball: string): VersionMeta {
