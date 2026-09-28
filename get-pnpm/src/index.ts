@@ -186,7 +186,7 @@ async function fetchPnpm (
     keys?: readonly SigningKey[]
   }
 ): Promise<{ version: string, binPath: string }> {
-  const packument = await fetchPackument(opts.registry, CLI_PKG_NAME, opts.headers)
+  const packument = await fetchPackument(opts.registry, CLI_PKG_NAME, opts.headers, opts.authPath)
   const version = resolveVersion(packument, opts.versionSpec)
   const major = majorVersion(version)
   const platformPkgName = platformPackageName({
@@ -275,7 +275,7 @@ function verifiedPackageFetcher (
   }
 ): (pkgName: string) => Promise<{ dir: string }> {
   return async function fetchPackage (pkgName: string): Promise<{ dir: string }> {
-    const meta = await fetchVersionMeta(opts.registry, pkgName, opts.version, opts.headers)
+    const meta = await fetchVersionMeta(opts.registry, pkgName, opts.version, opts.headers, opts.authPath)
     if (!meta.dist.integrity) {
       throw new Error(`The npm registry published no checksum for ${pkgName}@${opts.version}, so it cannot be verified.`)
     }

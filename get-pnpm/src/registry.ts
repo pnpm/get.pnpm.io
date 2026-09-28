@@ -89,12 +89,31 @@ let restoreProxy: () => void = () => {}
 const METADATA_TIMEOUT_MS = 30_000
 const TARBALL_TIMEOUT_MS = 15 * 60_000
 
-export async function fetchPackument (registry: string, pkgName: string, headers?: RequestHeaders): Promise<Packument> {
-  return fetchJson<Packument>(new URL(pkgName, registry), ABBREVIATED_PACKUMENT, headers)
+export async function fetchPackument (
+  registry: string,
+  pkgName: string,
+  headers?: RequestHeaders,
+  headersPath?: string
+): Promise<Packument> {
+  return fetchJson<Packument>(
+    new URL(pkgName, registry),
+    ABBREVIATED_PACKUMENT,
+    { registry, headers, headersPath }
+  )
 }
 
-export async function fetchVersionMeta (registry: string, pkgName: string, version: string, headers?: RequestHeaders): Promise<VersionMeta> {
-  return fetchJson<VersionMeta>(new URL(`${pkgName}/${version}`, registry), 'application/json', headers)
+export async function fetchVersionMeta (
+  registry: string,
+  pkgName: string,
+  version: string,
+  headers?: RequestHeaders,
+  headersPath?: string
+): Promise<VersionMeta> {
+  return fetchJson<VersionMeta>(
+    new URL(`${pkgName}/${version}`, registry),
+    'application/json',
+    { registry, headers, headersPath }
+  )
 }
 
 /**
@@ -108,7 +127,7 @@ export async function fetchVersionMeta (registry: string, pkgName: string, versi
  */
 export async function downloadTarball (meta: VersionMeta, dest: string, opts: TarballOptions = {}): Promise<void> {
   const url = tarballUrl(meta, opts.registry)
-  const response = await request(url, undefined, TARBALL_TIMEOUT_MS, headersFor(url, opts))
+  const response = await request(url, undefined, TARBALL_TIMEOUT_MS, opts)
   const [algorithm, expected] = checksum(meta)
   const hash = createHash(algorithm)
   const body = response.body as unknown as AsyncIterable<Uint8Array>
@@ -127,12 +146,18 @@ export async function downloadTarball (meta: VersionMeta, dest: string, opts: Ta
   }
 }
 
-export interface TarballOptions {
-  /** Registry the metadata came from, to re-host an npm tarball URL onto. */
+interface ScopedHeadersOptions {
+  /** Registry the credentials belong to. */
   registry?: string
   /** Credentials for `registry`, withheld from any other origin. */
   headers?: RequestHeaders
+  /** Optional npmrc path scope for the credentials. */
   headersPath?: string
+}
+
+export interface TarballOptions extends ScopedHeadersOptions {
+  /** Registry the metadata came from, to re-host an npm tarball URL onto. */
+  registry?: string
 }
 
 /**
@@ -149,7 +174,7 @@ export function tarballUrl (meta: VersionMeta, registry?: string): URL {
   return new URL(`${url.pathname.replace(/^\//, '')}${url.search}`, normalizeRegistry(registry))
 }
 
-function headersFor (url: URL, opts: TarballOptions): RequestHeaders | undefined {
+function headersFor (url: URL, opts: ScopedHeadersOptions): RequestHeaders | undefined {
   if (opts.headers == null || opts.registry == null) return undefined
   const registry = new URL(normalizeRegistry(opts.registry))
   if (url.origin !== registry.origin) return undefined
@@ -178,29 +203,61 @@ function checksum (meta: VersionMeta): [algorithm: string, expected: string] {
   return [entry.slice(0, separator), entry.slice(separator + 1)]
 }
 
-async function fetchJson<T> (url: URL, accept: string, headers?: RequestHeaders): Promise<T> {
-  const response = await request(url, accept, METADATA_TIMEOUT_MS, headers)
+async function fetchJson<T> (
+  url: URL,
+  accept: string,
+  opts: ScopedHeadersOptions = {}
+): Promise<T> {
+  const response = await request(url, accept, METADATA_TIMEOUT_MS, opts)
   return await response.json() as T
 }
 
-async function request (url: URL, accept: string | undefined, timeoutMs: number, headers?: RequestHeaders): Promise<Response> {
-  let response: Response
-  try {
-    response = await fetch(url, {
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: { ...headers, ...(accept ? { accept } : {}) },
-    })
-  } catch (err) {
-    const reason = (err as Error).name === 'TimeoutError'
-      ? `timed out after ${Math.round(timeoutMs / 1000)}s`
-      : (err as Error).message
-    throw new Error(`Could not reach ${url.href}: ${reason}`, { cause: err })
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
+const MAX_REDIRECTS = 20
+
+async function request (
+  url: URL,
+  accept: string | undefined,
+  timeoutMs: number,
+  opts: ScopedHeadersOptions = {}
+): Promise<Response> {
+  const signal = AbortSignal.timeout(timeoutMs)
+  let currentUrl = url
+
+  for (let redirects = 0; ; redirects++) {
+    let response: Response
+    try {
+      response = await fetch(currentUrl, {
+        redirect: 'manual',
+        signal,
+        headers: { ...headersFor(currentUrl, opts), ...(accept ? { accept } : {}) },
+      })
+    } catch (err) {
+      const reason = (err as Error).name === 'TimeoutError'
+        ? `timed out after ${Math.round(timeoutMs / 1000)}s`
+        : (err as Error).message
+      throw new Error(`Could not reach ${currentUrl.href}: ${reason}`, { cause: err })
+    }
+
+    if (REDIRECT_STATUSES.has(response.status)) {
+      const location = response.headers.get('location')
+      if (location == null) {
+        throw new Error(`Could not download ${currentUrl.href}: ${response.status} redirect without a Location header`)
+      }
+      if (redirects >= MAX_REDIRECTS) {
+        throw new Error(`Could not download ${url.href}: too many redirects`)
+      }
+      await response.body?.cancel()
+      currentUrl = new URL(location, currentUrl)
+      continue
+    }
+
+    if (!response.ok) {
+      throw new Error(`Could not download ${currentUrl.href}: ${response.status} ${response.statusText}`)
+    }
+    if (response.body == null) {
+      throw new Error(`Empty response from ${currentUrl.href}`)
+    }
+    return response
   }
-  if (!response.ok) {
-    throw new Error(`Could not download ${url.href}: ${response.status} ${response.statusText}`)
-  }
-  if (response.body == null) {
-    throw new Error(`Empty response from ${url.href}`)
-  }
-  return response
 }
