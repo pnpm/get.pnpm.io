@@ -218,7 +218,7 @@ describe('renderUndoHint', () => {
   test('points at the user environment variables on Windows', () => {
     assert.equal(
       renderUndoHint('C:\\Users\\me\\AppData\\Local\\pnpm', 'win32'),
-      'To uninstall, delete C:\\Users\\me\\AppData\\Local\\pnpm, then remove the PNPM_HOME variable and the %PNPM_HOME%\\bin entry of Path from your user environment variables.\n' +
+      'To uninstall, delete C:\\Users\\me\\AppData\\Local\\pnpm, then remove the PNPM_HOME variable and the Path entry that starts with %PNPM_HOME% from your user environment variables.\n' +
       'See https://pnpm.io/uninstall'
     )
   })
