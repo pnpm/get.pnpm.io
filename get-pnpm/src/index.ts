@@ -8,6 +8,7 @@ import { isMusl, platformPackageName } from './platformPackageName.js'
 import { downloadTarball, fetchPackument, fetchVersionMeta, registryFromEnv, useProxyFromEnv } from './registry.js'
 import { majorVersion, resolveVersion } from './resolveVersion.js'
 import { findShadowingPnpm, pnpmHomeDir, renderShadowingPnpmWarning } from './shadowingPnpm.js'
+import { renderUndoHint } from './undoHint.js'
 import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
 
 export { type DownloadExecutableOptions, downloadPnpmExecutable } from './downloadExecutable.js'
@@ -16,6 +17,7 @@ export { isMusl, platformPackageName, type Target } from './platformPackageName.
 export { DEFAULT_REGISTRY, registryFromEnv, type RequestHeaders, useProxyFromEnv } from './registry.js'
 export { type Packument, majorVersion, resolveVersion } from './resolveVersion.js'
 export { detectInstallOrigin, findShadowingPnpm, type InstallOrigin, pnpmHomeDir, renderShadowingPnpmWarning, type ShadowingPnpm } from './shadowingPnpm.js'
+export { renderUndoHint } from './undoHint.js'
 export { type PackageSignature, type SigningKey, verifyRegistrySignature } from './verifySignature.js'
 
 /**
@@ -110,7 +112,10 @@ export async function installPnpm (
     const { binPath } = await downloadPnpm({ ...opts, dest: tmpDir })
     const { error, status } = spawnSync(binPath, ['setup', '--force'], { stdio: 'inherit' })
     if (error != null) throw error
-    if (status === 0) warnIfPnpmIsShadowed()
+    if (status === 0) {
+      console.log(renderUndoHint(pnpmHomeDir()))
+      warnIfPnpmIsShadowed()
+    }
     return status ?? 1
   } finally {
     for (const signal of signals) {

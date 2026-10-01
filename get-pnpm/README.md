@@ -10,6 +10,10 @@ Installs pnpm the same way [the standalone install script](https://github.com/pn
 npx get-pnpm
 ```
 
+This is a permanent install that edits your shell configuration (see
+[What it changes](#what-it-changes)). To run pnpm once in someone else's
+project, `npx pnpm install` needs neither.
+
 Install a specific version, major, or dist-tag:
 
 ```sh
@@ -24,6 +28,42 @@ If `pnpm --version` still prints an older version, another `pnpm` — from
 `npm install -g pnpm`, Homebrew, Corepack, or Volta — comes before `$PNPM_HOME/bin`
 on your `PATH`. The installer looks for one when it is done and says which it found
 and the command that removes it.
+
+## What it changes
+
+- **`PNPM_HOME`** — pnpm is installed here: `$XDG_DATA_HOME/pnpm` when that is set,
+  otherwise `~/.local/share/pnpm` on Linux, `~/Library/pnpm` on macOS, and
+  `%LOCALAPPDATA%\pnpm` on Windows.
+- **Your shell configuration** — on Linux and macOS, `pnpm setup` adds a block like
+  this to the rc file of your shell (`~/.bashrc`, `~/.zshrc`,
+  `~/.config/fish/config.fish`, or `~/.config/nushell/env.nu`), and says which file
+  it changed:
+
+  ```sh
+  # pnpm
+  export PNPM_HOME='/home/me/.local/share/pnpm'
+  case ":$PATH:" in
+    *":$PNPM_HOME/bin:"*) ;;
+    *) export PATH="$PNPM_HOME/bin:$PATH" ;;
+  esac
+  # pnpm end
+  ```
+
+  On Windows, it sets a `PNPM_HOME` user environment variable instead and adds
+  `%PNPM_HOME%\bin` to your user `Path`.
+
+## Uninstalling
+
+1. Delete the `PNPM_HOME` directory, e.g. `rm -rf ~/.local/share/pnpm`.
+2. On Linux and macOS, delete the lines from `# pnpm` to `# pnpm end` in the rc file
+   the installer named. On Windows, remove the `PNPM_HOME` variable and the
+   `%PNPM_HOME%\bin` entry of `Path` under *Edit environment variables for your
+   account*.
+3. Open a new terminal.
+
+The installer prints these steps when it finishes. See
+[pnpm.io/uninstall](https://pnpm.io/uninstall) for removing global packages and the
+store first.
 
 ## How it works
 
