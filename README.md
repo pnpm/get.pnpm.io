@@ -140,6 +140,24 @@ To finish switching, run "npm uninstall -g pnpm" or move /Users/me/Library/pnpm/
 
 `pnpm doctor` reports the same thing later, and `pnpm self-update` warns the same way.
 
+## Uninstalling
+
+The installers put pnpm in `PNPM_HOME` and run `pnpm setup`, which puts
+`$PNPM_HOME/bin` on your `PATH`. To undo both:
+
+1. Delete the `PNPM_HOME` directory — `~/.local/share/pnpm` on Linux,
+   `~/Library/pnpm` on macOS, `%LOCALAPPDATA%\pnpm` on Windows, unless you set
+   `PNPM_HOME` or `XDG_DATA_HOME`.
+2. On Linux and macOS, delete the lines from `# pnpm` to `# pnpm end` in your shell's
+   rc file (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`, or
+   `~/.config/nushell/env.nu`). On Windows, remove the `PNPM_HOME` variable and the
+   `%PNPM_HOME%\bin` entry of `Path` under *Edit environment variables for your
+   account*.
+3. Open a new terminal.
+
+See [pnpm.io/uninstall](https://pnpm.io/uninstall) for removing global packages and
+the store first.
+
 ## Configuring
 
 By default, the script will install the latest version of pnpm. A specific version can be installed by specifying the `PNPM_VERSION` environment variable:

@@ -101,6 +101,16 @@ describe('findShadowingPnpm', () => {
     )
     assert.equal(fs.existsSync(executable), true)
   })
+
+  test('names a Windows executable as it is spelled on disk, not in PATHEXT', () => {
+    const other = path.join(tempRoot(), 'other')
+    const executable = writeExecutable(other, 'pnpm.cmd')
+
+    assert.equal(
+      findShadowingPnpm(tempRoot(), { pathEnv: other, platform: 'win32', pathExt: '.EXE;.CMD' })?.executable,
+      executable
+    )
+  })
 })
 
 describe('detectInstallOrigin', () => {

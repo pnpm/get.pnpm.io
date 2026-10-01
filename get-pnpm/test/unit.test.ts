@@ -8,6 +8,7 @@ import { after, before, describe, test } from 'node:test'
 import { platformPackageName, type Target } from '../lib/platformPackageName.js'
 import { resolveVersion } from '../lib/resolveVersion.js'
 import { sameFileContents } from '../lib/sameFileContents.js'
+import { renderUndoHint } from '../lib/undoHint.js'
 import { type SigningKey, verifyRegistrySignature } from '../lib/verifySignature.js'
 
 describe('resolveVersion', () => {
@@ -202,5 +203,23 @@ describe('sameFileContents', () => {
     assert.equal(sameFileContents(file, path.join(dir, 'absent')), false)
     assert.equal(sameFileContents(file, path.join(dir, 'as-directory')), false)
     assert.equal(sameFileContents(file, path.join(dir, 'as-symlink')), false)
+  })
+})
+
+describe('renderUndoHint', () => {
+  test('points at the shell config block on POSIX', () => {
+    assert.equal(
+      renderUndoHint('/home/me/.local/share/pnpm', 'linux'),
+      'To uninstall, delete /home/me/.local/share/pnpm and the lines from "# pnpm" to "# pnpm end" in the shell config file named above.\n' +
+      'See https://pnpm.io/uninstall'
+    )
+  })
+
+  test('points at the user environment variables on Windows', () => {
+    assert.equal(
+      renderUndoHint('C:\\Users\\me\\AppData\\Local\\pnpm', 'win32'),
+      'To uninstall, delete C:\\Users\\me\\AppData\\Local\\pnpm, then remove the PNPM_HOME variable and the Path entry that starts with %PNPM_HOME% from your user environment variables.\n' +
+      'See https://pnpm.io/uninstall'
+    )
   })
 })
