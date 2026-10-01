@@ -462,4 +462,19 @@ function Write-ShadowingPnpmWarning {
   }
 }
 
+# How to take back what `pnpm setup` just did. Setup names the shell config
+# file it changed and prints the lines it added, so this points back at that
+# output rather than guessing the file again. On Windows, setup edits the user
+# environment instead.
+function Write-UndoHint {
+  $pnpmHome = Get-PnpmHomeDir
+  if ($platform -eq 'win32') {
+    Write-Host "To uninstall, delete $pnpmHome, then remove the PNPM_HOME variable and the Path entry that starts with %PNPM_HOME% from your user environment variables."
+  } else {
+    Write-Host "To uninstall, delete $pnpmHome and the lines from `"# pnpm`" to `"# pnpm end`" in the shell config file named above."
+  }
+  Write-Host "See https://pnpm.io/uninstall"
+}
+
+Write-UndoHint
 Write-ShadowingPnpmWarning
