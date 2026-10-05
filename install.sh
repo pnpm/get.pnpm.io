@@ -615,5 +615,22 @@ warn_if_pnpm_is_shadowed() {
   shadowing_pnpm_warning "$SHADOWING_PNPM" "$(install_origin "$SHADOWING_PNPM")" "$pnpm_home" >&2
 }
 
+# How to take back what `pnpm setup` just did. Setup names the shell config
+# file it changed and prints the lines it added, so this points back at that
+# output rather than guessing the file again. On Windows, setup edits the user
+# environment instead.
+print_undo_hint() {
+  if [ "$(detect_platform)" = 'win32' ]; then
+    printf '%s\n' \
+      "To uninstall, delete the PNPM_HOME directory, then remove the PNPM_HOME variable and the Path entry pnpm setup added from your user environment variables." \
+      "See https://pnpm.io/uninstall"
+  else
+    printf '%s\n' \
+      "To uninstall, delete $(pnpm_home_dir) and the lines pnpm setup added to the shell config file named above." \
+      "See https://pnpm.io/uninstall"
+  fi
+}
+
 download_and_install || abort "Install Error!"
+print_undo_hint
 warn_if_pnpm_is_shadowed

@@ -12,7 +12,7 @@ root="$(dirname "$here")"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 
-sed '/^download_and_install || abort "Install Error!"$/d; /^warn_if_pnpm_is_shadowed$/d' "$root/install.sh" > "$work/installer.sh"
+sed '/^download_and_install || abort "Install Error!"$/d; /^print_undo_hint$/d; /^warn_if_pnpm_is_shadowed$/d' "$root/install.sh" > "$work/installer.sh"
 
 # shellcheck source=/dev/null
 . "$work/installer.sh"
@@ -130,6 +130,12 @@ case "$actual" in
 esac
 actual="$(PATH="$own_bin:$other" PNPM_HOME="$pnpm_home" warn_if_pnpm_is_shadowed 2>&1)"
 [ "$actual" = '' ] || fail 'warn_if_pnpm_is_shadowed with pnpm first' '' "$actual"
+
+# The uninstall hint names the directory `pnpm setup` installed into.
+expected_hint="To uninstall, delete /opt/pnpm-home and the lines pnpm setup added to the shell config file named above.
+See https://pnpm.io/uninstall"
+actual_hint="$(PNPM_HOME=/opt/pnpm-home print_undo_hint)"
+[ "$actual_hint" = "$expected_hint" ] || fail 'print_undo_hint' "$expected_hint" "$actual_hint"
 
 if [ "$failures" -ne 0 ]; then
   echo "$failures failure(s)"

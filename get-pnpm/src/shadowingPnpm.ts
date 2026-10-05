@@ -119,12 +119,27 @@ function lookUpAll (pathEnv: string, platform: NodeJS.Platform, pathExt: string 
     : ['pnpm']
   const found: string[] = []
   for (const dir of pathEnv.split(platform === 'win32' ? ';' : ':')) {
+    const base = dir === '' ? '.' : dir
+    const spellings = platform === 'win32' ? spellingsOnDisk(base) : undefined
     for (const name of names) {
-      const candidate = path.join(dir === '' ? '.' : dir, name)
+      const candidate = path.join(base, spellings?.get(name.toLowerCase()) ?? name)
       if (isExecutableFile(candidate, platform)) found.push(candidate)
     }
   }
   return found
+}
+
+/**
+ * The names in `dir` keyed by their lower case form. Windows matches
+ * `pnpm.CMD` from PATHEXT to `pnpm.cmd` on disk, and the warning should name
+ * the file as it is spelled there.
+ */
+function spellingsOnDisk (dir: string): Map<string, string> {
+  try {
+    return new Map(fs.readdirSync(dir).map((entry) => [entry.toLowerCase(), entry]))
+  } catch {
+    return new Map()
+  }
 }
 
 function isExecutableFile (file: string, platform: NodeJS.Platform): boolean {
