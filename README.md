@@ -5,20 +5,23 @@
 On POSIX systems, you may install pnpm even if you don't have Node.js installed, using the following script:
 
 ```sh
-curl -fsSL https://get.pnpm.io/install.sh | sh -
+curl -fsSL https://get.pnpm.io | sh -
 ```
 
 If you don't have curl installed, you would like to use wget:
 
 ```sh
-wget -qO- https://get.pnpm.io/install.sh | sh -
+wget -qO- https://get.pnpm.io | sh -
 ```
 
 On Windows (PowerShell):
 
 ```sh
-iwr https://get.pnpm.io/install.ps1 -useb | iex
+iwr https://get.pnpm.io/ps1 -useb | iex
 ```
+
+`https://get.pnpm.io` and `https://get.pnpm.io/ps1` serve the same files as
+`https://get.pnpm.io/install.sh` and `https://get.pnpm.io/install.ps1`, which keep working.
 
 These commands run the installer as soon as it is downloaded. To check that it is
 the script pnpm published before running it, see [Verifying files](#verifying-files).
@@ -165,11 +168,11 @@ the store first.
 By default, the script will install the latest version of pnpm. A specific version can be installed by specifying the `PNPM_VERSION` environment variable:
 
 ```sh
-curl -fsSL https://get.pnpm.io/install.sh | PNPM_VERSION=6.27.2 sh -
+curl -fsSL https://get.pnpm.io | PNPM_VERSION=6.27.2 sh -
 ```
 
 ```sh
-$env:PNPM_VERSION='6.27.2' ; iwr https://get.pnpm.io/install.ps1 -useb | iex
+$env:PNPM_VERSION='6.27.2' ; iwr https://get.pnpm.io/ps1 -useb | iex
 ```
 
 `PNPM_VERSION` also takes a bare major, which installs that major's current
@@ -177,7 +180,7 @@ release — its `latest-<major>` dist-tag, or `next-<major>` for a major that ha
 not been promoted to stable yet:
 
 ```sh
-curl -fsSL https://get.pnpm.io/install.sh | PNPM_VERSION=12 sh -
+curl -fsSL https://get.pnpm.io | PNPM_VERSION=12 sh -
 ```
 
 All the supported environment variables that can influence pnpm's installation:
