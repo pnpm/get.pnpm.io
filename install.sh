@@ -622,11 +622,11 @@ warn_if_pnpm_is_shadowed() {
 print_undo_hint() {
   if [ "$(detect_platform)" = 'win32' ]; then
     printf '%s\n' \
-      "To uninstall, delete the PNPM_HOME directory, then remove the PNPM_HOME variable and the Path entry that starts with %PNPM_HOME% from your user environment variables." \
+      "To uninstall, delete the PNPM_HOME directory, then remove the PNPM_HOME variable and the Path entry pnpm setup added from your user environment variables." \
       "See https://pnpm.io/uninstall"
   else
     printf '%s\n' \
-      "To uninstall, delete $(pnpm_home_dir) and the lines from \"# pnpm\" to \"# pnpm end\" in the shell config file named above." \
+      "To uninstall, delete $(pnpm_home_dir) and the lines pnpm setup added to the shell config file named above." \
       "See https://pnpm.io/uninstall"
   fi
 }

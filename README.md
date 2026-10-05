@@ -148,11 +148,13 @@ The installers put pnpm in `PNPM_HOME` and run `pnpm setup`, which puts
 1. Delete the `PNPM_HOME` directory — `~/.local/share/pnpm` on Linux,
    `~/Library/pnpm` on macOS, `%LOCALAPPDATA%\pnpm` on Windows, unless you set
    `PNPM_HOME` or `XDG_DATA_HOME`.
-2. On Linux and macOS, delete the lines from `# pnpm` to `# pnpm end` in your shell's
-   rc file (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`, or
-   `~/.config/nushell/env.nu`). On Windows, remove the `PNPM_HOME` variable and the
-   `%PNPM_HOME%\bin` entry of `Path` under *Edit environment variables for your
-   account*.
+2. On Linux and macOS, delete the lines `pnpm setup` added to your shell's rc file
+   (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`, or
+   `~/.config/nushell/env.nu`): the block from `# pnpm` to `# pnpm end`, or the
+   unmarked `PNPM_HOME` and `PATH` lines older pnpm versions write. On Windows, remove
+   the `PNPM_HOME` variable and the `Path` entry pointing into it (`%PNPM_HOME%`,
+   `%PNPM_HOME%\bin`, or the expanded path) under *Edit environment variables for
+   your account*.
 3. Open a new terminal.
 
 See [pnpm.io/uninstall](https://pnpm.io/uninstall) for removing global packages and

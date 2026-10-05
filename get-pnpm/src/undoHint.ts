@@ -6,7 +6,7 @@
  */
 export function renderUndoHint (pnpmHome: string, platform: NodeJS.Platform = process.platform): string {
   const undo = platform === 'win32'
-    ? `delete ${pnpmHome}, then remove the PNPM_HOME variable and the Path entry that starts with %PNPM_HOME% from your user environment variables.`
-    : `delete ${pnpmHome} and the lines from "# pnpm" to "# pnpm end" in the shell config file named above.`
+    ? `delete ${pnpmHome}, then remove the PNPM_HOME variable and the Path entry pnpm setup added from your user environment variables.`
+    : `delete ${pnpmHome} and the lines pnpm setup added to the shell config file named above.`
   return `To uninstall, ${undo}\nSee https://pnpm.io/uninstall`
 }

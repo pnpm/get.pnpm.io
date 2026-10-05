@@ -210,7 +210,7 @@ describe('renderUndoHint', () => {
   test('points at the shell config block on POSIX', () => {
     assert.equal(
       renderUndoHint('/home/me/.local/share/pnpm', 'linux'),
-      'To uninstall, delete /home/me/.local/share/pnpm and the lines from "# pnpm" to "# pnpm end" in the shell config file named above.\n' +
+      'To uninstall, delete /home/me/.local/share/pnpm and the lines pnpm setup added to the shell config file named above.\n' +
       'See https://pnpm.io/uninstall'
     )
   })
@@ -218,7 +218,7 @@ describe('renderUndoHint', () => {
   test('points at the user environment variables on Windows', () => {
     assert.equal(
       renderUndoHint('C:\\Users\\me\\AppData\\Local\\pnpm', 'win32'),
-      'To uninstall, delete C:\\Users\\me\\AppData\\Local\\pnpm, then remove the PNPM_HOME variable and the Path entry that starts with %PNPM_HOME% from your user environment variables.\n' +
+      'To uninstall, delete C:\\Users\\me\\AppData\\Local\\pnpm, then remove the PNPM_HOME variable and the Path entry pnpm setup added from your user environment variables.\n' +
       'See https://pnpm.io/uninstall'
     )
   })
