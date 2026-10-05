@@ -58,6 +58,7 @@ export async function downloadPnpmExecutable (opts: DownloadExecutableOptions): 
   const registry = normalizeRegistry(opts.registry)
   const packageName = platformPackageName({
     major: majorVersion(opts.version),
+    version: opts.version,
     platform: process.platform,
     arch: process.arch,
     musl: isMusl(),
