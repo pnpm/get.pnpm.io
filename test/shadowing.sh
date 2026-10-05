@@ -132,7 +132,7 @@ actual="$(PATH="$own_bin:$other" PNPM_HOME="$pnpm_home" warn_if_pnpm_is_shadowed
 [ "$actual" = '' ] || fail 'warn_if_pnpm_is_shadowed with pnpm first' '' "$actual"
 
 # The uninstall hint names the directory `pnpm setup` installed into.
-expected_hint="To uninstall, delete /opt/pnpm-home and the lines from \"# pnpm\" to \"# pnpm end\" in the shell config file named above.
+expected_hint="To uninstall, delete /opt/pnpm-home and the lines pnpm setup added to the shell config file named above.
 See https://pnpm.io/uninstall"
 actual_hint="$(PNPM_HOME=/opt/pnpm-home print_undo_hint)"
 [ "$actual_hint" = "$expected_hint" ] || fail 'print_undo_hint' "$expected_hint" "$actual_hint"
