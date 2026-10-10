@@ -89,6 +89,12 @@ let restoreProxy: () => void = () => {}
 const METADATA_TIMEOUT_MS = 30_000
 const TARBALL_TIMEOUT_MS = 15 * 60_000
 
+// A reset connection or a 502 from a load balancer in front of the registry is
+// transient, and should not fail the whole install. `fetch` retries none of
+// this on its own, so it is done here.
+const MAX_ATTEMPTS = 3
+const RETRY_DELAY_MS = 500
+
 export async function fetchPackument (registry: string, pkgName: string, headers?: RequestHeaders): Promise<Packument> {
   return fetchJson<Packument>(new URL(pkgName, registry), ABBREVIATED_PACKUMENT, headers)
 }
@@ -108,20 +114,25 @@ export async function fetchVersionMeta (registry: string, pkgName: string, versi
  */
 export async function downloadTarball (meta: VersionMeta, dest: string, opts: TarballOptions = {}): Promise<void> {
   const url = tarballUrl(meta, opts.registry)
-  const response = await request(url, undefined, TARBALL_TIMEOUT_MS, headersFor(url, opts))
   const [algorithm, expected] = checksum(meta)
-  const hash = createHash(algorithm)
-  const body = response.body as unknown as AsyncIterable<Uint8Array>
-  await pipeline(
-    async function * () {
-      for await (const chunk of body) {
-        hash.update(chunk)
-        yield chunk
-      }
-    },
-    createWriteStream(dest)
-  )
-  const actual = hash.digest('base64')
+  // The whole download is retried, not just the request: a connection reset
+  // halfway through a ~150 MB body is the likeliest blip of all. Each attempt
+  // rewrites `dest` from the start.
+  const actual = await withRetries(async () => {
+    const response = await request(url, undefined, TARBALL_TIMEOUT_MS, headersFor(url, opts))
+    const hash = createHash(algorithm)
+    const body = readBody(response, url, TARBALL_TIMEOUT_MS)
+    await pipeline(
+      async function * () {
+        for await (const chunk of body) {
+          hash.update(chunk)
+          yield chunk
+        }
+      },
+      createWriteStream(dest)
+    )
+    return hash.digest('base64')
+  })
   if (actual !== expected) {
     throw new Error(`The download from ${url.href} does not match the checksum the npm registry published for it. Refusing to install.`)
   }
@@ -174,8 +185,35 @@ function checksum (meta: VersionMeta): [algorithm: string, expected: string] {
 }
 
 async function fetchJson<T> (url: URL, accept: string, headers?: RequestHeaders): Promise<T> {
-  const response = await request(url, accept, METADATA_TIMEOUT_MS, headers)
-  return await response.json() as T
+  return withRetries(async () => {
+    const response = await request(url, accept, METADATA_TIMEOUT_MS, headers)
+    const chunks: Uint8Array[] = []
+    for await (const chunk of readBody(response, url, METADATA_TIMEOUT_MS)) chunks.push(chunk)
+    // Malformed JSON is what the server sent, and would be sent again, so a
+    // parse failure is not retried.
+    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T
+  })
+}
+
+/** A request failure, marked so `withRetries` knows whether retrying it can help. */
+class RequestFailure extends Error {
+  readonly retryable: boolean
+
+  constructor (message: string, opts: { cause?: unknown, retryable: boolean }) {
+    super(message, { cause: opts.cause })
+    this.retryable = opts.retryable
+  }
+}
+
+async function withRetries<T> (attempt: () => Promise<T>): Promise<T> {
+  for (let attemptNo = 1; ; attemptNo++) {
+    try {
+      return await attempt()
+    } catch (err) {
+      if (attemptNo >= MAX_ATTEMPTS || !(err instanceof RequestFailure) || !err.retryable) throw err
+      await delay(RETRY_DELAY_MS * attemptNo)
+    }
+  }
 }
 
 async function request (url: URL, accept: string | undefined, timeoutMs: number, headers?: RequestHeaders): Promise<Response> {
@@ -186,16 +224,68 @@ async function request (url: URL, accept: string | undefined, timeoutMs: number,
       headers: { ...headers, ...(accept ? { accept } : {}) },
     })
   } catch (err) {
-    const reason = (err as Error).name === 'TimeoutError'
-      ? `timed out after ${Math.round(timeoutMs / 1000)}s`
-      : (err as Error).message
-    throw new Error(`Could not reach ${url.href}: ${reason}`, { cause: err })
+    throw new RequestFailure(`Could not reach ${url.href}: ${reasonFor(err, timeoutMs)}`, { cause: err, retryable: isRetryableError(err, timeoutMs) })
   }
   if (!response.ok) {
-    throw new Error(`Could not download ${url.href}: ${response.status} ${response.statusText}`)
-  }
-  if (response.body == null) {
-    throw new Error(`Empty response from ${url.href}`)
+    // Left unread, the body would hold the connection until it is collected.
+    await response.body?.cancel().catch(() => {})
+    throw new RequestFailure(`Could not download ${url.href}: ${response.status} ${response.statusText}`, { retryable: isRetryableStatus(response.status) })
   }
   return response
+}
+
+/**
+ * `response`'s body, with a connection lost partway through, or a body that
+ * never came, marked as worth retrying. A 200 with nothing in it is a proxy or
+ * CDN hiccup, not an answer.
+ */
+async function * readBody (response: Response, url: URL, timeoutMs: number): AsyncIterable<Uint8Array> {
+  let received = 0
+  if (response.body != null) {
+    try {
+      for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+        received += chunk.byteLength
+        yield chunk
+      }
+    } catch (err) {
+      throw interrupted(url, err, timeoutMs)
+    }
+  }
+  if (received === 0) {
+    throw new RequestFailure(`Empty response from ${url.href}`, { retryable: true })
+  }
+}
+
+function interrupted (url: URL, err: unknown, timeoutMs: number): RequestFailure {
+  return new RequestFailure(`The download from ${url.href} was interrupted: ${reasonFor(err, timeoutMs)}`, { cause: err, retryable: isRetryableError(err, timeoutMs) })
+}
+
+function reasonFor (err: unknown, timeoutMs: number): string {
+  return (err as Error).name === 'TimeoutError'
+    ? `timed out after ${Math.round(timeoutMs / 1000)}s`
+    : (err as Error).message
+}
+
+/**
+ * A connection that could not be made, or was reset, is exactly the kind of
+ * blip retrying is for. So is a metadata request that stalled. A tarball that
+ * ran out its whole budget is not: that budget is already sized for a slow
+ * connection, and each retry would hang the install for as long again.
+ */
+function isRetryableError (err: unknown, timeoutMs: number): boolean {
+  return (err as Error).name !== 'TimeoutError' || timeoutMs < TARBALL_TIMEOUT_MS
+}
+
+/**
+ * A 4xx means the request itself is wrong (a missing package, a bad
+ * credential) — retrying would just ask the same wrong question again. The
+ * exceptions are a request timeout and rate limiting, which say "not now"
+ * rather than "no". A 5xx is the server's problem, and often a transient one.
+ */
+function isRetryableStatus (status: number): boolean {
+  return status === 408 || status === 429 || status >= 500
+}
+
+async function delay (ms: number): Promise<void> {
+  await new Promise<void>((resolve) => { setTimeout(resolve, ms) })
 }

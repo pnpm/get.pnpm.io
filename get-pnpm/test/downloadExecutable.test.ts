@@ -41,6 +41,18 @@ let cdnRequests: Array<{ path: string, authorization?: string }> = []
 let proxiedOrigins: string[] = []
 /** When set, the second tarball request of a test waits on it before being served. */
 let holdSecondTarball: Promise<void> | null = null
+/** Registry requests left to answer by destroying the connection instead of responding. */
+let registryResetsRemaining = 0
+/** Tarball requests left to answer by destroying the connection instead of responding. */
+let tarballResetsRemaining = 0
+/** Tarball requests left to answer by sending half the body and then destroying the connection. */
+let tarballCutsRemaining = 0
+/** Statuses to answer the next registry requests with, one per request, instead of serving them. */
+let registryStatuses: number[] = []
+/** Registry requests left to answer with a 200 that has no body. */
+let registryEmptiesRemaining = 0
+/** Tarball requests left to answer with a 200 that has no body. */
+let tarballEmptiesRemaining = 0
 
 // Node applies a proxy after startup from 24.14; before that the request goes
 // direct, which the proxy tests have nothing to say about.
@@ -68,7 +80,25 @@ describe('downloadPnpmExecutable', () => {
     }
 
     cdn = http.createServer(async (req, res) => {
+      if (tarballResetsRemaining > 0) {
+        tarballResetsRemaining--
+        req.socket.destroy()
+        return
+      }
       cdnRequests.push({ path: req.url!, authorization: req.headers.authorization })
+      if (tarballEmptiesRemaining > 0) {
+        tarballEmptiesRemaining--
+        res.writeHead(200, { 'content-type': 'application/octet-stream' })
+        res.end()
+        return
+      }
+      if (tarballCutsRemaining > 0) {
+        tarballCutsRemaining--
+        const bytes = bytesFor(mode)
+        res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length })
+        res.write(bytes.subarray(0, bytes.length >> 1), () => { req.socket.destroy() })
+        return
+      }
       if (cdnRequests.length === 2 && holdSecondTarball != null) await holdSecondTarball
       serveTarball(res)
     })
@@ -78,8 +108,25 @@ describe('downloadPnpmExecutable', () => {
     await listen(probe)
 
     server = http.createServer((req, res) => {
+      if (registryResetsRemaining > 0) {
+        registryResetsRemaining--
+        req.socket.destroy()
+        return
+      }
       const url = decodeURIComponent(req.url!)
       requests.push({ path: url, authorization: req.headers.authorization })
+      if (registryEmptiesRemaining > 0) {
+        registryEmptiesRemaining--
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end()
+        return
+      }
+      const status = registryStatuses.shift()
+      if (status != null) {
+        res.writeHead(status)
+        res.end('not now')
+        return
+      }
       if (url.endsWith(`/${VERSION}`)) {
         // The registry may be served from a subpath, which is not part of the
         // package name the signature covers.
@@ -154,6 +201,12 @@ describe('downloadPnpmExecutable', () => {
     cdnRequests = []
     proxiedOrigins = []
     holdSecondTarball = null
+    registryResetsRemaining = 0
+    tarballResetsRemaining = 0
+    tarballCutsRemaining = 0
+    registryStatuses = []
+    registryEmptiesRemaining = 0
+    tarballEmptiesRemaining = 0
   })
 
   test('places the executable and nothing else', async () => {
@@ -259,6 +312,88 @@ describe('downloadPnpmExecutable', () => {
 
     assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
     assert.deepEqual(new Set(proxiedOrigins), new Set([hostOf(server), hostOf(cdn)]), 'the retry went through the proxy')
+  })
+
+  test('retries a registry request that had its connection reset', async () => {
+    registryResetsRemaining = 1
+    const destPath = destIn('registry-reset')
+
+    await downloadPnpmExecutable({ version: VERSION, registry, destPath, keys: KEYS })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.equal(requests.length, 1, 'only the successful attempt reached the handler that records requests')
+  })
+
+  test('retries a tarball download that had its connection reset', async () => {
+    tarballResetsRemaining = 1
+    const destPath = destIn('tarball-reset')
+
+    await downloadPnpmExecutable({ version: VERSION, registry, destPath, keys: KEYS })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.equal(cdnRequests.length, 1, 'only the successful attempt reached the handler that records requests')
+  })
+
+  test('gives up on a registry connection that keeps resetting', async () => {
+    registryResetsRemaining = 5
+    const destPath = destIn('registry-exhausted')
+
+    await assert.rejects(
+      downloadPnpmExecutable({ version: VERSION, registry, destPath, keys: KEYS }),
+      /Could not reach/
+    )
+    assert.deepEqual(fs.readdirSync(path.dirname(destPath)), [])
+  })
+
+  test('retries a tarball download whose connection was lost partway through the body', async () => {
+    tarballCutsRemaining = 1
+    const destPath = destIn('tarball-cut')
+
+    await downloadPnpmExecutable({ version: VERSION, registry, destPath, keys: KEYS })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.equal(cdnRequests.length, 2)
+  })
+
+  test('retries a registry request answered with a 5xx or a 429', async () => {
+    registryStatuses = [503, 429]
+    const destPath = destIn('registry-5xx')
+
+    await downloadPnpmExecutable({ version: VERSION, registry, destPath, keys: KEYS })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.equal(requests.length, 3)
+  })
+
+  test('retries a registry response that came back empty', async () => {
+    registryEmptiesRemaining = 1
+    const destPath = destIn('registry-empty')
+
+    await downloadPnpmExecutable({ version: VERSION, registry, destPath, keys: KEYS })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.equal(requests.length, 2)
+  })
+
+  test('retries a tarball download that came back empty', async () => {
+    tarballEmptiesRemaining = 1
+    const destPath = destIn('tarball-empty')
+
+    await downloadPnpmExecutable({ version: VERSION, registry, destPath, keys: KEYS })
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.equal(cdnRequests.length, 2)
+  })
+
+  test('does not retry a registry request answered with a 404', async () => {
+    registryStatuses = [404]
+    const destPath = destIn('registry-404')
+
+    await assert.rejects(
+      downloadPnpmExecutable({ version: VERSION, registry, destPath, keys: KEYS }),
+      /404/
+    )
+    assert.equal(requests.length, 1)
   })
 
   test('re-hosts an npm tarball URL onto the registry that served the metadata', async () => {
