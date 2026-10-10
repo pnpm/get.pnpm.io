@@ -187,13 +187,11 @@ function checksum (meta: VersionMeta): [algorithm: string, expected: string] {
 async function fetchJson<T> (url: URL, accept: string, headers?: RequestHeaders): Promise<T> {
   return withRetries(async () => {
     const response = await request(url, accept, METADATA_TIMEOUT_MS, headers)
-    try {
-      return await response.json() as T
-    } catch (err) {
-      // Malformed JSON is what the server sent, and would be sent again.
-      if (err instanceof SyntaxError) throw err
-      throw interrupted(url, err, METADATA_TIMEOUT_MS)
-    }
+    const chunks: Uint8Array[] = []
+    for await (const chunk of readBody(response, url, METADATA_TIMEOUT_MS)) chunks.push(chunk)
+    // Malformed JSON is what the server sent, and would be sent again, so a
+    // parse failure is not retried.
+    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T
   })
 }
 
@@ -233,18 +231,28 @@ async function request (url: URL, accept: string | undefined, timeoutMs: number,
     await response.body?.cancel().catch(() => {})
     throw new RequestFailure(`Could not download ${url.href}: ${response.status} ${response.statusText}`, { retryable: isRetryableStatus(response.status) })
   }
-  if (response.body == null) {
-    throw new RequestFailure(`Empty response from ${url.href}`, { retryable: true })
-  }
   return response
 }
 
-/** `response`'s body, with a connection lost partway through marked as worth retrying. */
+/**
+ * `response`'s body, with a connection lost partway through, or a body that
+ * never came, marked as worth retrying. A 200 with nothing in it is a proxy or
+ * CDN hiccup, not an answer.
+ */
 async function * readBody (response: Response, url: URL, timeoutMs: number): AsyncIterable<Uint8Array> {
-  try {
-    yield * response.body as unknown as AsyncIterable<Uint8Array>
-  } catch (err) {
-    throw interrupted(url, err, timeoutMs)
+  let received = 0
+  if (response.body != null) {
+    try {
+      for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+        received += chunk.byteLength
+        yield chunk
+      }
+    } catch (err) {
+      throw interrupted(url, err, timeoutMs)
+    }
+  }
+  if (received === 0) {
+    throw new RequestFailure(`Empty response from ${url.href}`, { retryable: true })
   }
 }
 
