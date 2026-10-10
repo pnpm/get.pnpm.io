@@ -196,6 +196,7 @@ async function fetchPnpm (
   const major = majorVersion(version)
   const platformPkgName = platformPackageName({
     major,
+    version,
     platform: process.platform,
     arch: process.arch,
     musl: isMusl(),
