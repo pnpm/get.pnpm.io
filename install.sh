@@ -389,15 +389,19 @@ download_and_install() {
 
   assert_target_is_built "$platform" "$arch" "$major_version"
 
+  # Every pnpm v11 build for arm64 musl Linux segfaults at startup, and later
+  # v11 releases no longer publish one, so the download would either install a
+  # binary that crashes or 404. v12 ships a working one.
+  # See https://github.com/pnpm/pnpm/issues/10443.
   if [ "$platform-$arch$libc_suffix" = 'linux-arm64-musl' ] && [ "$major_version" -eq 11 ]; then
     abort \
-      "pnpm v${version} does not provide a working binary for Linux ARM64 musl (linux-arm64-musl)." \
+      "pnpm v${version} does not provide a working binary for arm64 musl Linux (linux-arm64-musl)." \
       "" \
-      "Install the JavaScript package using your system Node.js:" \
-      "  npm install -g pnpm@${version}" \
+      "Install pnpm a different way instead:" \
+      "  PNPM_VERSION=12 sh -c \"\$(curl -fsSL https://get.pnpm.io/install.sh)\"    # pnpm v12 ships one" \
+      "  npm install -g pnpm@${version}    # uses your system Node.js" \
       "" \
-      "Or install pnpm 12, which provides a working binary:" \
-      "  PNPM_VERSION=12 sh -c \"\$(curl -fsSL https://get.pnpm.io/install.sh)\""
+      "More context: https://github.com/pnpm/pnpm/issues/10443"
   fi
 
   # Intel macOS isn't supported on pnpm v11 only: the SEA binary produced

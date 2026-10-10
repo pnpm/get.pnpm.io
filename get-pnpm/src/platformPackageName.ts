@@ -59,8 +59,8 @@ More context: https://github.com/pnpm/pnpm/issues/11423`)
     throw new Error(`pnpm v11 does not provide a working binary for arm64 musl Linux (linux-arm64-musl).
 
 Install pnpm a different way instead:
-  npm install -g pnpm@${version ?? major}    # uses your system Node.js
   npx get-pnpm 12        # pnpm v12 ships an arm64 musl Linux binary
+  npm install -g pnpm@${version ?? major}    # uses your system Node.js
 
 More context: https://github.com/pnpm/pnpm/issues/10443`)
   }
