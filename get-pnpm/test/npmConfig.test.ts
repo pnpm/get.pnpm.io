@@ -238,6 +238,20 @@ test('does not use a token scoped to another registry', () => {
   assert.deepEqual(config, { registry: 'https://registry.example.test/' })
 })
 
+test('expands an optional environment reference that is set, and skips the token when it is not', () => {
+  const root = tempDir()
+  const npmrc = path.join(root, 'user.npmrc')
+  fs.writeFileSync(npmrc, '//registry.example.test/:_authToken=${NPM_TOKEN?}\n')
+
+  const opts = (env: NodeJS.ProcessEnv) => ({
+    cwd: root,
+    env: { ...env, npm_config_registry: 'https://registry.example.test/', npm_config_userconfig: npmrc, npm_config_globalconfig: path.join(root, 'missing') },
+  })
+
+  assert.equal(registryConfigFromEnv(opts({ NPM_TOKEN: 'set-token' })).headers?.authorization, 'Bearer set-token')
+  assert.equal(registryConfigFromEnv(opts({})).headers, undefined)
+})
+
 function tempDir (): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'get-pnpm-config-'))
   tmpDirs.push(dir)

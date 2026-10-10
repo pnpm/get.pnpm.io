@@ -221,13 +221,13 @@ function stripQuotes (value: string): string {
 
 function expandEnv (value: string, env: NodeJS.ProcessEnv): string | undefined {
   let missing = false
-  const expanded = value.replace(/\$\{([^}]+)\}/g, (_match, name: string) => {
+  // `${NAME?}` is npm's spelling for "empty when unset"; a bare `${NAME}` that
+  // is unset drops the entry rather than sending the placeholder as a token.
+  const expanded = value.replace(/\$\{([^${}?]+)(\?)?\}/g, (_match, name: string, optional?: string) => {
     const resolved = env[name]
-    if (resolved == null) {
-      missing = true
-      return ''
-    }
-    return resolved
+    if (resolved != null) return resolved
+    if (optional == null) missing = true
+    return ''
   })
   return missing ? undefined : expanded
 }
