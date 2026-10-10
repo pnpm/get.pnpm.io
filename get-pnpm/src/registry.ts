@@ -95,12 +95,31 @@ const TARBALL_TIMEOUT_MS = 15 * 60_000
 const MAX_ATTEMPTS = 3
 const RETRY_DELAY_MS = 500
 
-export async function fetchPackument (registry: string, pkgName: string, headers?: RequestHeaders): Promise<Packument> {
-  return fetchJson<Packument>(new URL(pkgName, registry), ABBREVIATED_PACKUMENT, headers)
+export async function fetchPackument (
+  registry: string,
+  pkgName: string,
+  headers?: RequestHeaders,
+  headersPath?: string
+): Promise<Packument> {
+  return fetchJson<Packument>(
+    new URL(pkgName, registry),
+    ABBREVIATED_PACKUMENT,
+    { registry, headers, headersPath }
+  )
 }
 
-export async function fetchVersionMeta (registry: string, pkgName: string, version: string, headers?: RequestHeaders): Promise<VersionMeta> {
-  return fetchJson<VersionMeta>(new URL(`${pkgName}/${version}`, registry), 'application/json', headers)
+export async function fetchVersionMeta (
+  registry: string,
+  pkgName: string,
+  version: string,
+  headers?: RequestHeaders,
+  headersPath?: string
+): Promise<VersionMeta> {
+  return fetchJson<VersionMeta>(
+    new URL(`${pkgName}/${version}`, registry),
+    'application/json',
+    { registry, headers, headersPath }
+  )
 }
 
 /**
@@ -119,7 +138,7 @@ export async function downloadTarball (meta: VersionMeta, dest: string, opts: Ta
   // halfway through a ~150 MB body is the likeliest blip of all. Each attempt
   // rewrites `dest` from the start.
   const actual = await withRetries(async () => {
-    const response = await request(url, undefined, TARBALL_TIMEOUT_MS, headersFor(url, opts))
+    const response = await request(url, undefined, TARBALL_TIMEOUT_MS, opts)
     const hash = createHash(algorithm)
     const body = readBody(response, url, TARBALL_TIMEOUT_MS)
     await pipeline(
@@ -138,11 +157,18 @@ export async function downloadTarball (meta: VersionMeta, dest: string, opts: Ta
   }
 }
 
-export interface TarballOptions {
-  /** Registry the metadata came from, to re-host an npm tarball URL onto. */
+interface ScopedHeadersOptions {
+  /** Registry the credentials belong to. */
   registry?: string
   /** Credentials for `registry`, withheld from any other origin. */
   headers?: RequestHeaders
+  /** Optional npmrc path scope for the credentials. */
+  headersPath?: string
+}
+
+export interface TarballOptions extends ScopedHeadersOptions {
+  /** Registry the metadata came from, to re-host an npm tarball URL onto. */
+  registry?: string
 }
 
 /**
@@ -159,9 +185,13 @@ export function tarballUrl (meta: VersionMeta, registry?: string): URL {
   return new URL(`${url.pathname.replace(/^\//, '')}${url.search}`, normalizeRegistry(registry))
 }
 
-function headersFor (url: URL, opts: TarballOptions): RequestHeaders | undefined {
+function headersFor (url: URL, opts: ScopedHeadersOptions): RequestHeaders | undefined {
   if (opts.headers == null || opts.registry == null) return undefined
-  return url.origin === new URL(opts.registry).origin ? opts.headers : undefined
+  const registry = new URL(normalizeRegistry(opts.registry))
+  if (url.origin !== registry.origin) return undefined
+  if (opts.headersPath == null) return opts.headers
+  const scope = opts.headersPath.endsWith('/') ? opts.headersPath : `${opts.headersPath}/`
+  return url.pathname.startsWith(scope) ? opts.headers : undefined
 }
 
 /**
@@ -184,9 +214,9 @@ function checksum (meta: VersionMeta): [algorithm: string, expected: string] {
   return [entry.slice(0, separator), entry.slice(separator + 1)]
 }
 
-async function fetchJson<T> (url: URL, accept: string, headers?: RequestHeaders): Promise<T> {
+async function fetchJson<T> (url: URL, accept: string, opts: ScopedHeadersOptions = {}): Promise<T> {
   return withRetries(async () => {
-    const response = await request(url, accept, METADATA_TIMEOUT_MS, headers)
+    const response = await request(url, accept, METADATA_TIMEOUT_MS, opts)
     const chunks: Uint8Array[] = []
     for await (const chunk of readBody(response, url, METADATA_TIMEOUT_MS)) chunks.push(chunk)
     // Malformed JSON is what the server sent, and would be sent again, so a
@@ -216,22 +246,51 @@ async function withRetries<T> (attempt: () => Promise<T>): Promise<T> {
   }
 }
 
-async function request (url: URL, accept: string | undefined, timeoutMs: number, headers?: RequestHeaders): Promise<Response> {
-  let response: Response
-  try {
-    response = await fetch(url, {
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: { ...headers, ...(accept ? { accept } : {}) },
-    })
-  } catch (err) {
-    throw new RequestFailure(`Could not reach ${url.href}: ${reasonFor(err, timeoutMs)}`, { cause: err, retryable: isRetryableError(err, timeoutMs) })
-  }
-  if (!response.ok) {
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
+const MAX_REDIRECTS = 20
+
+/**
+ * Follows redirects by hand, so each hop gets only the credentials
+ * `headersFor` allows it: `fetch` would carry them to any path on the same
+ * origin, outside the scope the token was configured for.
+ */
+async function request (
+  url: URL,
+  accept: string | undefined,
+  timeoutMs: number,
+  opts: ScopedHeadersOptions = {}
+): Promise<Response> {
+  const signal = AbortSignal.timeout(timeoutMs)
+  let currentUrl = url
+
+  for (let redirects = 0; ; redirects++) {
+    let response: Response
+    try {
+      response = await fetch(currentUrl, {
+        redirect: 'manual',
+        signal,
+        headers: { ...headersFor(currentUrl, opts), ...(accept ? { accept } : {}) },
+      })
+    } catch (err) {
+      throw new RequestFailure(`Could not reach ${currentUrl.href}: ${reasonFor(err, timeoutMs)}`, { cause: err, retryable: isRetryableError(err, timeoutMs) })
+    }
+
+    if (!REDIRECT_STATUSES.has(response.status) && response.ok) return response
+
     // Left unread, the body would hold the connection until it is collected.
     await response.body?.cancel().catch(() => {})
-    throw new RequestFailure(`Could not download ${url.href}: ${response.status} ${response.statusText}`, { retryable: isRetryableStatus(response.status) })
+    if (!REDIRECT_STATUSES.has(response.status)) {
+      throw new RequestFailure(`Could not download ${currentUrl.href}: ${response.status} ${response.statusText}`, { retryable: isRetryableStatus(response.status) })
+    }
+    const location = response.headers.get('location')
+    if (location == null) {
+      throw new RequestFailure(`Could not download ${currentUrl.href}: ${response.status} redirect without a Location header`, { retryable: false })
+    }
+    if (redirects >= MAX_REDIRECTS) {
+      throw new RequestFailure(`Could not download ${url.href}: too many redirects`, { retryable: false })
+    }
+    currentUrl = new URL(location, currentUrl)
   }
-  return response
 }
 
 /**

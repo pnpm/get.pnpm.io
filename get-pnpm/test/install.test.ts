@@ -29,6 +29,7 @@ let server: http.Server
 let registry: string
 let mode: Mode = 'ok'
 let setupLog: string
+let authorizations: Array<string | undefined> = []
 
 // The fake executable the mock serves is a `#!/bin/sh` script, so the flow that
 // runs it is POSIX-only. The verification it exercises is platform-independent.
@@ -45,6 +46,7 @@ describe('installPnpm', { skip: process.platform === 'win32' }, () => {
     }
 
     server = http.createServer((req, res) => {
+      authorizations.push(req.headers.authorization)
       const url = decodeURIComponent(req.url!)
       const json = (body: unknown): void => {
         res.writeHead(200, { 'content-type': 'application/json' })
@@ -123,6 +125,23 @@ describe('installPnpm', { skip: process.platform === 'win32' }, () => {
     // manifest either — the fixture is a v12-shaped release, whose `dist/` is
     // self-contained.
     assert.deepEqual(fs.readdirSync(dest).sort(), ['dist', 'pnpm'])
+  })
+
+  test('sends credentials to every registry request', async () => {
+    mode = 'ok'
+    authorizations = []
+    const dest = path.join(tmpDir, 'authenticated')
+
+    await downloadPnpm({
+      versionSpec: 'latest',
+      registry,
+      dest,
+      headers: { authorization: 'Bearer a-token' },
+      keys: KEYS,
+    })
+
+    assert.equal(authorizations.length, 5)
+    assert.deepEqual(new Set(authorizations), new Set(['Bearer a-token']))
   })
 
   test('downloads from the registry that served the metadata, not from npm', async () => {

@@ -77,7 +77,20 @@ and its checksum, so a checksum taken from it proves nothing on its own; npm als
 signs `<name>@<version>:<integrity>` with a key that this package pins, and a
 download that fails either check is refused rather than installed.
 
-The download goes to the registry npm is configured with (`npm_config_registry`), not to GitHub — including the tarball itself, so a registry that proxies npm and hands back an npmjs.org URL does not send the download off the mirror. The command does not support registries that require authentication; `downloadPnpmExecutable` takes request headers for one.
+The download goes to the registry npm is configured with (`npm_config_registry`), not to GitHub — including the tarball itself, so a registry that proxies npm and hands back an npmjs.org URL does not send the download off the mirror.
+
+### Private registries
+
+The CLI reads registry-scoped `_authToken` entries from the project, user, and global npm config files. Values may reference environment variables the same way npmrc files do:
+
+```ini
+registry=https://registry.example.com/npm/
+//registry.example.com/npm/:_authToken=${NPM_TOKEN}
+```
+
+An equivalent `npm_config_//registry.example.com/npm/:_authToken` environment entry is also accepted when the environment can represent that name. Credentials embedded in `npm_config_registry` are converted to HTTP Basic authentication and removed from the request URL.
+
+Authentication from npm config is sent only to the configured registry origin and the selected token's path scope. If registry metadata names a tarball on another origin or outside that scope, the credentials are not forwarded there. Prefer HTTPS for authenticated registries; configuring an HTTP registry sends its credentials over that HTTP connection.
 
 ## Environment variables
 
@@ -86,6 +99,7 @@ The download goes to the registry npm is configured with (`npm_config_registry`)
 | `PNPM_VERSION` | Version to install when no argument is given. |
 | `PNPM_HOME` | Directory to install pnpm into. |
 | `npm_config_registry` | Registry to download pnpm from. |
+| `npm_config_*:_authToken` | Registry-scoped bearer token. Project, user, and global npmrc tokens are also read. |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | Proxy to download through, and hosts to reach directly. Applied on Node 24.14 and later; earlier releases go direct. |
 
 ## Using it from a program
@@ -102,6 +116,7 @@ const { version, binPath } = await downloadPnpm({
   versionSpec: 'next-12',
   registry: 'https://registry.npmjs.org/',
   dest: '/opt/pnpm',
+  headers: { authorization: 'Bearer …' },
 })
 ```
 
@@ -120,7 +135,7 @@ await downloadPnpmExecutable({
   version: '12.0.0',
   registry: 'https://registry.npmjs.org/',
   destPath: '/opt/pnpm/pnpm',
-  headers: { authorization: 'Bearer …' }, // optional; never sent off the registry
+  headers: { authorization: 'Bearer …' },
 })
 ```
 
