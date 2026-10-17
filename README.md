@@ -33,9 +33,9 @@ with `install.sh`, `install.ps1`, `SHASUMS256.txt`, and `SHASUMS256.txt.sig` att
 CI jobs can fall back to the release when get.pnpm.io fails:
 
 ```sh
-curl -fsSL https://get.pnpm.io/ -o /tmp/pnpm-install.sh \
-  || curl -fsSL https://github.com/pnpm/get.pnpm.io/releases/latest/download/install.sh -o /tmp/pnpm-install.sh
-sh /tmp/pnpm-install.sh
+{ curl -fsSL https://get.pnpm.io/ -o /tmp/pnpm-install.sh \
+  || curl -fsSL https://github.com/pnpm/get.pnpm.io/releases/latest/download/install.sh -o /tmp/pnpm-install.sh; } \
+  && sh /tmp/pnpm-install.sh
 ```
 
 ## Verifying files
