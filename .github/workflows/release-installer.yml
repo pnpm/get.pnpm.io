@@ -1,0 +1,49 @@
+name: Release installer
+
+# Publishes the installer scripts as GitHub release assets, so
+# https://github.com/pnpm/get.pnpm.io/releases/latest/download/install.sh
+# serves the same files as get.pnpm.io when that host is unreachable.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - install.sh
+      - install.ps1
+      - SHASUMS256.txt
+      - SHASUMS256.txt.sig
+      - .github/workflows/release-installer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # Only files that match the signed SHASUMS256.txt are published.
+      - name: Verify integrity
+        run: sh ./_check.sh
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="installer-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$tag is already released"
+            exit 0
+          fi
+          gh release create "$tag" \
+            install.sh install.ps1 SHASUMS256.txt SHASUMS256.txt.sig \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Installer $tag" \
+            --notes "The installer scripts from $GITHUB_SHA. They are the files get.pnpm.io serves. See [Verifying files](https://github.com/pnpm/get.pnpm.io#verifying-files)." \
+            --latest
