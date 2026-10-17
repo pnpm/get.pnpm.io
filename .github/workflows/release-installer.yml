@@ -18,6 +18,13 @@ on:
 permissions:
   contents: read
 
+# Runs one at a time, so a newer commit is always released after an older
+# one. A run waiting here is cancelled when a newer one queues, which is
+# fine because the newer commit supersedes it.
+concurrency:
+  group: release-installer
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -35,6 +42,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Release only the installer main serves now: main must contain this
+          # commit, and no later commit on main may change the released files.
+          # A run started by hand on another ref, or an older run whose files
+          # were changed again, leaves the release to the newer run.
+          compare="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${GITHUB_SHA}...main")"
+          status="$(jq -r .status <<< "$compare")"
+          case "$status" in
+            identical | ahead) ;;
+            *)
+              echo "main does not contain $GITHUB_SHA ($status), so it is not released"
+              exit 0
+              ;;
+          esac
+          changed="$(jq -r '.files[].filename' <<< "$compare" \
+            | grep -xF -e install.sh -e install.ps1 -e SHASUMS256.txt -e SHASUMS256.txt.sig || true)"
+          if [ -n "$changed" ]; then
+            echo "main has newer changes to ${changed//$'\n'/, }, so $GITHUB_SHA is not released"
+            exit 0
+          fi
           tag="installer-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "$tag is already released"
