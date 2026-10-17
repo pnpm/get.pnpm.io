@@ -1,0 +1,71 @@
+name: Release installer
+
+# Publishes the installer scripts as GitHub release assets, so
+# https://github.com/pnpm/get.pnpm.io/releases/latest/download/install.sh
+# serves the same files as get.pnpm.io when that host is unreachable.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - install.sh
+      - install.ps1
+      - SHASUMS256.txt
+      - SHASUMS256.txt.sig
+      - .github/workflows/release-installer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Runs one at a time, so a newer commit is always released after an older
+# one. A run waiting here is cancelled when a newer one queues, which is
+# fine because the newer commit supersedes it.
+concurrency:
+  group: release-installer
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # The full history, to compare this commit with main.
+          fetch-depth: 0
+      # Only files that match the signed SHASUMS256.txt are published.
+      - name: Verify integrity
+        run: sh ./_check.sh
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          files=(install.sh install.ps1 SHASUMS256.txt SHASUMS256.txt.sig)
+          # Release only the installer main serves now: main must contain this
+          # commit and serve the same installer files. A run started by hand on
+          # another ref, or an older run whose files were changed again, leaves
+          # the release to the newer run.
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "main does not contain $GITHUB_SHA, so it is not released"
+            exit 0
+          fi
+          if ! git diff --quiet "$GITHUB_SHA" origin/main -- "${files[@]}"; then
+            echo "main has changed the installer files since $GITHUB_SHA, so it is not released"
+            exit 0
+          fi
+          tag="installer-${GITHUB_SHA:0:12}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$tag is already released"
+            exit 0
+          fi
+          gh release create "$tag" \
+            "${files[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Installer $tag" \
+            --notes "The installer scripts from $GITHUB_SHA. They are the files get.pnpm.io serves. See [Verifying files](https://github.com/pnpm/get.pnpm.io#verifying-files)." \
+            --latest

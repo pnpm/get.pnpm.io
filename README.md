@@ -26,6 +26,18 @@ iwr https://get.pnpm.io/ps1 -useb | iex
 These commands run the installer as soon as it is downloaded. To check that it is
 the script pnpm published before running it, see [Verifying files](#verifying-files).
 
+### If get.pnpm.io is unreachable
+
+Every change to the installer is also published as a release of this repository,
+with `install.sh`, `install.ps1`, `SHASUMS256.txt`, and `SHASUMS256.txt.sig` attached.
+CI jobs can fall back to the release when get.pnpm.io fails:
+
+```sh
+{ curl -fsSL https://get.pnpm.io/ -o /tmp/pnpm-install.sh \
+  || curl -fsSL https://github.com/pnpm/get.pnpm.io/releases/latest/download/install.sh -o /tmp/pnpm-install.sh; } \
+  && sh /tmp/pnpm-install.sh
+```
+
 ## Verifying files
 
 The installer scripts served from this site are listed in [`SHASUMS256.txt`](https://get.pnpm.io/SHASUMS256.txt),
