@@ -210,7 +210,7 @@ describe('renderUndoHint', () => {
   test('points at the shell config block on POSIX', () => {
     assert.equal(
       renderUndoHint('/home/me/.local/share/pnpm', 'linux'),
-      'To uninstall, delete /home/me/.local/share/pnpm and the lines pnpm setup added to the shell config file named above.\n' +
+      'To uninstall, delete /home/me/.local/share/pnpm. If pnpm setup named a shell config file above, also remove the lines it added there.\n' +
       'See https://pnpm.io/uninstall'
     )
   })

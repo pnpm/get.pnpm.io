@@ -617,7 +617,8 @@ warn_if_pnpm_is_shadowed() {
 
 # How to take back what `pnpm setup` just did. Setup names the shell config
 # file it changed and prints the lines it added, so this points back at that
-# output rather than guessing the file again. On Windows, setup edits the user
+# output rather than guessing the file again. When setup cannot tell which file
+# to change, it changes none, so the hint does not assume one was named. On Windows, setup edits the user
 # environment instead.
 print_undo_hint() {
   if [ "$(detect_platform)" = 'win32' ]; then
@@ -626,7 +627,7 @@ print_undo_hint() {
       "See https://pnpm.io/uninstall"
   else
     printf '%s\n' \
-      "To uninstall, delete $(pnpm_home_dir) and the lines pnpm setup added to the shell config file named above." \
+      "To uninstall, delete $(pnpm_home_dir). If pnpm setup named a shell config file above, also remove the lines it added there." \
       "See https://pnpm.io/uninstall"
   fi
 }
