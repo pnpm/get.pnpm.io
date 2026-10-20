@@ -89,6 +89,11 @@ let restoreProxy: () => void = () => {}
 const METADATA_TIMEOUT_MS = 30_000
 const TARBALL_TIMEOUT_MS = 15 * 60_000
 
+// The tarball budget is too long to wait out a connection that stopped sending
+// partway through. Going this long without a byte abandons the attempt so it
+// can be retried, while a slow download that keeps making progress is left be.
+const TARBALL_STALL_TIMEOUT_MS = 30_000
+
 // A reset connection or a 502 from a load balancer in front of the registry is
 // transient, and should not fail the whole install. `fetch` retries none of
 // this on its own, so it is done here.
@@ -138,19 +143,25 @@ export async function downloadTarball (meta: VersionMeta, dest: string, opts: Ta
   // halfway through a ~150 MB body is the likeliest blip of all. Each attempt
   // rewrites `dest` from the start.
   const actual = await withRetries(async () => {
-    const response = await request(url, undefined, TARBALL_TIMEOUT_MS, opts)
-    const hash = createHash(algorithm)
-    const body = readBody(response, url, TARBALL_TIMEOUT_MS)
-    await pipeline(
-      async function * () {
-        for await (const chunk of body) {
-          hash.update(chunk)
-          yield chunk
-        }
-      },
-      createWriteStream(dest)
-    )
-    return hash.digest('base64')
+    const stall = stallWatchdog(opts.stallTimeoutMs ?? TARBALL_STALL_TIMEOUT_MS)
+    try {
+      const response = await request(url, undefined, TARBALL_TIMEOUT_MS, opts, stall.signal)
+      const hash = createHash(algorithm)
+      const body = readBody(response, url, TARBALL_TIMEOUT_MS)
+      await pipeline(
+        async function * () {
+          for await (const chunk of body) {
+            stall.reset()
+            hash.update(chunk)
+            yield chunk
+          }
+        },
+        createWriteStream(dest)
+      )
+      return hash.digest('base64')
+    } finally {
+      stall.clear()
+    }
   })
   if (actual !== expected) {
     throw new Error(`The download from ${url.href} does not match the checksum the npm registry published for it. Refusing to install.`)
@@ -169,6 +180,8 @@ interface ScopedHeadersOptions {
 export interface TarballOptions extends ScopedHeadersOptions {
   /** Registry the metadata came from, to re-host an npm tarball URL onto. */
   registry?: string
+  /** How long the download may go without receiving data before it is retried. */
+  stallTimeoutMs?: number
 }
 
 /**
@@ -258,9 +271,11 @@ async function request (
   url: URL,
   accept: string | undefined,
   timeoutMs: number,
-  opts: ScopedHeadersOptions = {}
+  opts: ScopedHeadersOptions = {},
+  stallSignal?: AbortSignal
 ): Promise<Response> {
-  const signal = AbortSignal.timeout(timeoutMs)
+  const timeout = AbortSignal.timeout(timeoutMs)
+  const signal = stallSignal == null ? timeout : AbortSignal.any([timeout, stallSignal])
   let currentUrl = url
 
   for (let redirects = 0; ; redirects++) {
@@ -313,6 +328,26 @@ async function * readBody (response: Response, url: URL, timeoutMs: number): Asy
   if (received === 0) {
     throw new RequestFailure(`Empty response from ${url.href}`, { retryable: true })
   }
+}
+
+/**
+ * A signal that aborts once `timeoutMs` passes without a call to `reset`.
+ *
+ * It aborts with a plain `Error` rather than a `TimeoutError`, so the failure
+ * reads as an interrupted connection and is retried like one.
+ */
+function stallWatchdog (timeoutMs: number): { signal: AbortSignal, reset: () => void, clear: () => void } {
+  const controller = new AbortController()
+  let timer: NodeJS.Timeout | undefined
+  const clear = (): void => { clearTimeout(timer) }
+  const reset = (): void => {
+    clear()
+    timer = setTimeout(() => {
+      controller.abort(new Error(`no data received for ${Math.round(timeoutMs / 1000)}s`))
+    }, timeoutMs)
+  }
+  reset()
+  return { signal: controller.signal, reset, clear }
 }
 
 function interrupted (url: URL, err: unknown, timeoutMs: number): RequestFailure {
