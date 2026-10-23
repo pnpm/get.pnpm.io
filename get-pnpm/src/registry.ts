@@ -90,7 +90,8 @@ let restoreProxy: () => void = () => {}
  *
  * `fetch` takes no CA of its own, so this is process-global, like the proxy:
  * overlapping calls each add theirs, and the defaults come back once the last
- * returned function has run.
+ * returned function has run. A connection or TLS session opened while the CAs
+ * were trusted can still be reused after that.
  *
  * Node.js before 22.19 and 24.5 cannot add a CA after startup, so there it only
  * says to use `NODE_EXTRA_CA_CERTS`.

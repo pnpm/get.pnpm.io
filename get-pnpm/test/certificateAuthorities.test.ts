@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import https from 'node:https'
 import os from 'node:os'
@@ -58,6 +58,13 @@ describe('a registry behind a private CA', { skip: !ADDS_CAS_AFTER_STARTUP && 't
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
+  // A pooled connection or a resumed TLS session skips the certificate check,
+  // so neither may carry over from a download that trusted the CA.
+  const forgetConnections = (): void => {
+    server.closeAllConnections()
+    server.setTicketKeys(randomBytes(48))
+  }
+
   // The signature is beside the point here, and has its own tests.
   const download = async (name: string, ca?: string[]): Promise<string> => {
     const destPath = path.join(tmpDir, name, EXECUTABLE)
@@ -80,8 +87,7 @@ describe('a registry behind a private CA', { skip: !ADDS_CAS_AFTER_STARTUP && 't
 
   test('is refused again once the download is done', async () => {
     await download('restored', [CA])
-    // A pooled connection would skip the handshake that checks the CA.
-    server.closeAllConnections()
+    forgetConnections()
     requests = []
 
     await assert.rejects(download('after'), /Could not reach/)
@@ -98,7 +104,7 @@ describe('a registry behind a private CA', { skip: !ADDS_CAS_AFTER_STARTUP && 't
     } finally {
       releaseSecond()
     }
-    server.closeAllConnections()
+    forgetConnections()
     await assert.rejects(download('overlap-released'), /Could not reach/)
   })
 })
