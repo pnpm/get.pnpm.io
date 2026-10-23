@@ -6,7 +6,7 @@ import path from 'node:path'
 import { extractTarball } from './extractTarball.js'
 import { registryConfigFromEnv } from './npmConfig.js'
 import { isMusl, platformPackageName } from './platformPackageName.js'
-import { downloadTarball, fetchPackument, fetchVersionMeta, type RequestHeaders, useProxyFromEnv } from './registry.js'
+import { downloadTarball, fetchPackument, fetchVersionMeta, type RequestHeaders, useCertificateAuthorities, useProxyFromEnv } from './registry.js'
 import { majorVersion, resolveVersion } from './resolveVersion.js'
 import { findShadowingPnpm, pnpmHomeDir, renderShadowingPnpmWarning } from './shadowingPnpm.js'
 import { renderUndoHint } from './undoHint.js'
@@ -15,7 +15,7 @@ import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
 export { type DownloadExecutableOptions, downloadPnpmExecutable } from './downloadExecutable.js'
 export { extractTarballMember } from './extractTarballMember.js'
 export { isMusl, platformPackageName, type Target } from './platformPackageName.js'
-export { DEFAULT_REGISTRY, registryFromEnv, type RequestHeaders, useProxyFromEnv } from './registry.js'
+export { DEFAULT_REGISTRY, registryFromEnv, type RequestHeaders, useCertificateAuthorities, useProxyFromEnv } from './registry.js'
 export { type Packument, majorVersion, resolveVersion } from './resolveVersion.js'
 export { detectInstallOrigin, findShadowingPnpm, type InstallOrigin, pnpmHomeDir, renderShadowingPnpmWarning, type ShadowingPnpm } from './shadowingPnpm.js'
 export { renderUndoHint } from './undoHint.js'
@@ -51,6 +51,11 @@ Environment variables:
   npm_config_*:_authToken
                          Registry-scoped bearer token. Project, user, and
                          global .npmrc auth tokens are also read.
+  npm_config_ca, npm_config_cafile
+                         CA certificates to trust for the registry, besides
+                         Node.js's own. Project, user, and global .npmrc ca,
+                         ca[], and cafile settings, top-level or scoped to the
+                         registry, are also read. Node 22.19/24.5 or later.
   HTTPS_PROXY            Proxy to download through (HTTP_PROXY for an http://
                          registry); NO_PROXY names hosts to reach directly.
                          Node 24.14 or later.
@@ -97,6 +102,7 @@ export async function installPnpm (
     registry: string
     authPath?: string
     headers?: RequestHeaders
+    ca?: readonly string[]
     keys?: readonly SigningKey[]
   }
 ): Promise<number> {
@@ -170,12 +176,19 @@ export async function downloadPnpm (
     dest: string
     authPath?: string
     headers?: RequestHeaders
+    /** PEM certificates of CAs to trust besides Node.js's own; see {@link useCertificateAuthorities}. */
+    ca?: readonly string[]
     keys?: readonly SigningKey[]
   }
 ): Promise<{ version: string, binPath: string }> {
   const restoreProxy = useProxyFromEnv()
   try {
-    return await fetchPnpm(opts)
+    const restoreCertificates = useCertificateAuthorities(opts.ca)
+    try {
+      return await fetchPnpm(opts)
+    } finally {
+      restoreCertificates()
+    }
   } finally {
     restoreProxy()
   }

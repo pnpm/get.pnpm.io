@@ -92,6 +92,15 @@ An equivalent `npm_config_//registry.example.com/npm/:_authToken` environment en
 
 Authentication from npm config is sent only to the configured registry origin and the selected token's path scope. If registry metadata names a tarball on another origin or outside that scope, the credentials are not forwarded there. Prefer HTTPS for authenticated registries; configuring an HTTP registry sends its credentials over that HTTP connection.
 
+A registry behind a private certificate authority is reached with the `ca`, `ca[]`, and `cafile` settings of the same files, top-level or scoped to the registry. They are read as pnpm reads them, and a relative `cafile` is resolved against the directory of the npmrc that names it:
+
+```ini
+cafile=certs/company-ca.pem
+//registry.example.com/npm/:ca="-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+```
+
+These CAs are trusted in addition to the ones Node.js trusts. Node.js 22.19 or 24.5 is needed to add them after startup. On older releases, set `NODE_EXTRA_CA_CERTS` to a file holding them.
+
 ## Environment variables
 
 | Variable | Description |
@@ -100,6 +109,7 @@ Authentication from npm config is sent only to the configured registry origin an
 | `PNPM_HOME` | Directory to install pnpm into. |
 | `npm_config_registry` | Registry to download pnpm from. |
 | `npm_config_*:_authToken` | Registry-scoped bearer token. Project, user, and global npmrc tokens are also read. |
+| `npm_config_ca`, `npm_config_cafile` | CA certificates to trust for the registry. Project, user, and global npmrc CA settings are also read. |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | Proxy to download through, and hosts to reach directly. Applied on Node 24.14 and later; earlier releases go direct. |
 
 ## Using it from a program
