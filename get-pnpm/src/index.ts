@@ -41,8 +41,9 @@ const USAGE = `Usage: npx get-pnpm [version]
 Installs pnpm as a standalone executable and adds it to your PATH.
 
 Arguments:
-  version            An exact version (11.20.0), a major (12), or a dist-tag
-                     (latest, next-12). Defaults to $PNPM_VERSION, then "latest".
+  version            An exact version (11.20.0), a major (12), a semver range
+                     (^12.1.0), or a dist-tag (latest, next-12). Defaults to
+                     $PNPM_VERSION, then "latest".
 
 Environment variables:
   PNPM_VERSION           Version to install when no argument is given.

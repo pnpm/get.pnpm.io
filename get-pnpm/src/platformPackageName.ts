@@ -78,8 +78,7 @@ function legacyOsSegment (platform: string, isMusl: boolean): string {
  *
  * Probed the way pnpm's own wrappers do it rather than through a dependency:
  * glibc builds report a `glibcVersionRuntime`, musl builds leave it unset.
- * Keeping this package dependency-free means `npx` fetches one thing before
- * pnpm exists.
+ * Every dependency is one more package `npx` fetches before pnpm exists.
  */
 export function isMusl (): boolean {
   if (process.platform !== 'linux') return false
