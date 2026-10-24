@@ -1,5 +1,5 @@
-import { spawnSync } from 'node:child_process'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { createHash, createSign, generateKeyPairSync } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -37,7 +37,7 @@ describe('installPnpm', { skip: process.platform === 'win32' }, () => {
   before(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'get-pnpm-test-'))
     setupLog = path.join(tmpDir, 'setup.log')
-    const tarballs = {
+    const tarballs: Tarballs = {
       // The wrapper carries `dist/`; the platform package carries the executable.
       pnpm: packTarball('wrapper', { 'dist/worker.js': 'export {}\n' }),
       platform: packTarball('platform', {
@@ -46,59 +46,20 @@ describe('installPnpm', { skip: process.platform === 'win32' }, () => {
     }
 
     server = http.createServer((req, res) => {
-      authorizations.push(req.headers.authorization)
-      const url = decodeURIComponent(req.url!)
-      const json = (body: unknown): void => {
-        res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify(body))
-      }
-
-      if (url === '/pnpm') {
-        json({ 'dist-tags': { latest: VERSION }, versions: { [VERSION]: {} } })
-        return
-      }
-      if (url.endsWith(`/${VERSION}`)) {
-        const kind = url === `/pnpm/${VERSION}` ? 'pnpm' : 'platform'
-        const name = url.slice(1, url.lastIndexOf('/'))
-        const bytes = fs.readFileSync(tarballs[kind])
-        const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`
-        // Signing a different checksum than the one served is what a tampered
-        // checksum looks like: the bytes and the metadata agree, the signature
-        // does not cover them.
-        const signed = mode === 'bad-signature' ? `sha512-${'A'.repeat(86)}==` : integrity
-        json({
-          dist: {
-            // An npm URL is what a registry proxying npm hands back, and has
-            // to be re-hosted onto the registry that answered.
-            tarball: mode === 'npm-tarball-url'
-              ? `https://registry.npmjs.org/${kind}.tgz`
-              : `${registry}${kind}.tgz`,
-            ...(mode === 'no-integrity' ? {} : { integrity }),
-            signatures: mode === 'unsigned'
-              ? []
-              : [{
-                keyid: mode === 'wrong-keyid' ? 'SHA256:not-pinned' : KEYS[0]!.keyid,
-                sig: createSign('SHA256').update(`${name}@${VERSION}:${signed}`).sign(privateKey, 'base64'),
-              }],
-          },
-        })
-        return
-      }
-      if (url === '/pnpm.tgz' || url === '/platform.tgz') {
-        const bytes = fs.readFileSync(tarballs[url === '/pnpm.tgz' ? 'pnpm' : 'platform'])
-        res.writeHead(200, { 'content-type': 'application/octet-stream' })
-        res.end(mode === 'bad-tarball' ? Buffer.concat([bytes, Buffer.from('tampered')]) : bytes)
-        return
-      }
-      res.writeHead(404)
-      res.end()
+      handleRequest(req, res, tarballs)
     })
-    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve)
+    })
     registry = `http://127.0.0.1:${(server.address() as { port: number }).port}/`
   })
 
   after(async () => {
-    await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve()
+      })
+    })
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
@@ -185,6 +146,64 @@ describe('installPnpm', { skip: process.platform === 'win32' }, () => {
     await assert.rejects(install, /published no checksum/)
   })
 })
+
+interface Tarballs {
+  pnpm: string
+  platform: string
+}
+
+function handleRequest (req: http.IncomingMessage, res: http.ServerResponse, tarballs: Tarballs): void {
+  authorizations.push(req.headers.authorization)
+  const url = decodeURIComponent(req.url!)
+  const json = (body: unknown): void => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(body))
+  }
+
+  if (url === '/pnpm') {
+    json({ 'dist-tags': { latest: VERSION }, versions: { [VERSION]: {} } })
+    return
+  }
+  if (url.endsWith(`/${VERSION}`)) {
+    const kind = url === `/pnpm/${VERSION}` ? 'pnpm' : 'platform'
+    const name = url.slice(1, url.lastIndexOf('/'))
+    json(versionMetaFor(name, kind, tarballs))
+    return
+  }
+  if (url === '/pnpm.tgz' || url === '/platform.tgz') {
+    const bytes = fs.readFileSync(tarballs[url === '/pnpm.tgz' ? 'pnpm' : 'platform'])
+    res.writeHead(200, { 'content-type': 'application/octet-stream' })
+    res.end(mode === 'bad-tarball' ? Buffer.concat([bytes, Buffer.from('tampered')]) : bytes)
+    return
+  }
+  res.writeHead(404)
+  res.end()
+}
+
+function versionMetaFor (name: string, kind: keyof Tarballs, tarballs: Tarballs): unknown {
+  const bytes = fs.readFileSync(tarballs[kind])
+  const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`
+  // Signing a different checksum than the one served is what a tampered
+  // checksum looks like: the bytes and the metadata agree, the signature
+  // does not cover them.
+  const signed = mode === 'bad-signature' ? `sha512-${'A'.repeat(86)}==` : integrity
+  return {
+    dist: {
+      // An npm URL is what a registry proxying npm hands back, and has
+      // to be re-hosted onto the registry that answered.
+      tarball: mode === 'npm-tarball-url'
+        ? `https://registry.npmjs.org/${kind}.tgz`
+        : `${registry}${kind}.tgz`,
+      ...(mode === 'no-integrity' ? {} : { integrity }),
+      signatures: mode === 'unsigned'
+        ? []
+        : [{
+          keyid: mode === 'wrong-keyid' ? 'SHA256:not-pinned' : KEYS[0]!.keyid,
+          sig: createSign('SHA256').update(`${name}@${VERSION}:${signed}`).sign(privateKey, 'base64'),
+        }],
+    },
+  }
+}
 
 function leftoverTmpDirs (): string[] {
   return fs.readdirSync(os.tmpdir()).filter((entry) => entry.startsWith('pnpm-install-'))

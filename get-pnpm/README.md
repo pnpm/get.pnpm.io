@@ -163,6 +163,7 @@ somewhere other than the host that served the bytes.
 
 ```sh
 pnpm install
+pnpm lint     # pnpm/pnpm's ESLint rules
 pnpm test     # builds, then runs the tests against the build output
 ```
 

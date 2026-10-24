@@ -117,16 +117,13 @@ function lookUpAll (pathEnv: string, platform: NodeJS.Platform, pathExt: string 
   const names = platform === 'win32'
     ? (pathExt ?? process.env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean).map((ext) => `pnpm${ext}`)
     : ['pnpm']
-  const found: string[] = []
-  for (const dir of pathEnv.split(platform === 'win32' ? ';' : ':')) {
+  return pathEnv.split(platform === 'win32' ? ';' : ':').flatMap((dir) => {
     const base = dir === '' ? '.' : dir
     const spellings = platform === 'win32' ? spellingsOnDisk(base) : undefined
-    for (const name of names) {
-      const candidate = path.join(base, spellings?.get(name.toLowerCase()) ?? name)
-      if (isExecutableFile(candidate, platform)) found.push(candidate)
-    }
-  }
-  return found
+    return names
+      .map((name) => path.join(base, spellings?.get(name.toLowerCase()) ?? name))
+      .filter((candidate) => isExecutableFile(candidate, platform))
+  })
 }
 
 /**

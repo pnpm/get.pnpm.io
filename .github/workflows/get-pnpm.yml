@@ -41,4 +41,7 @@ jobs:
           install: false
 
       - run: pnpm install --frozen-lockfile
+      # Lint results do not depend on the runner, so one is enough.
+      - run: pnpm lint
+        if: matrix.os == 'ubuntu-latest' && matrix.runtime == 'node@24'
       - run: pnpm test

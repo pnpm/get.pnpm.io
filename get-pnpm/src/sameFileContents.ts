@@ -8,33 +8,38 @@ const CHUNK_SIZE = 64 * 1024
  * Compared rather than hashed: the answer is usually "no" at the first
  * differing byte, and there is nothing to gain from reading further.
  *
- * `b` is the untrusted side — a path something else may hold — so anything
- * other than a readable regular file of the same size is simply not the same
- * file, rather than an error.
+ * `candidate` is the untrusted side — a path something else may hold — so
+ * anything other than a readable regular file of the same size is simply not
+ * the same file, rather than an error.
  */
-export function sameFileContents (a: string, b: string): boolean {
-  const sizeA = fs.statSync(a).size
-  const statB = fs.lstatSync(b, { throwIfNoEntry: false })
-  if (statB?.isFile() !== true || statB.size !== sizeA) return false
+export function sameFileContents (file: string, candidate: string): boolean {
+  const size = fs.statSync(file).size
+  const candidateStat = fs.lstatSync(candidate, { throwIfNoEntry: false })
+  if (candidateStat?.isFile() !== true || candidateStat.size !== size) return false
 
-  let fdA: number | undefined
-  let fdB: number | undefined
+  let fileFd: number | undefined
+  let candidateFd: number | undefined
   try {
-    fdA = fs.openSync(a, 'r')
-    fdB = fs.openSync(b, 'r')
-    const bufferA = Buffer.alloc(CHUNK_SIZE)
-    const bufferB = Buffer.alloc(CHUNK_SIZE)
-    while (true) {
-      const readA = fs.readSync(fdA, bufferA, 0, CHUNK_SIZE, null)
-      const readB = fs.readSync(fdB, bufferB, 0, CHUNK_SIZE, null)
-      if (readA !== readB) return false
-      if (readA === 0) return true
-      if (!bufferA.subarray(0, readA).equals(bufferB.subarray(0, readB))) return false
-    }
+    fileFd = fs.openSync(file, 'r')
+    candidateFd = fs.openSync(candidate, 'r')
+    return sameBytes(fileFd, candidateFd)
   } catch {
     return false
   } finally {
-    if (fdA !== undefined) fs.closeSync(fdA)
-    if (fdB !== undefined) fs.closeSync(fdB)
+    if (fileFd !== undefined) fs.closeSync(fileFd)
+    if (candidateFd !== undefined) fs.closeSync(candidateFd)
+  }
+}
+
+/** Whether the rest of two open files is the same, read chunk by chunk. */
+function sameBytes (fdA: number, fdB: number): boolean {
+  const bufferA = Buffer.alloc(CHUNK_SIZE)
+  const bufferB = Buffer.alloc(CHUNK_SIZE)
+  while (true) {
+    const readA = fs.readSync(fdA, bufferA, 0, CHUNK_SIZE, null)
+    const readB = fs.readSync(fdB, bufferB, 0, CHUNK_SIZE, null)
+    if (readA !== readB) return false
+    if (readA === 0) return true
+    if (!bufferA.subarray(0, readA).equals(bufferB.subarray(0, readB))) return false
   }
 }

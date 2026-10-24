@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -7,6 +7,12 @@ import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { downloadTarball, fetchVersionMeta, type VersionMeta } from '../lib/registry.js'
+
+const REDIRECTS = new Map([
+  ['/npm/redirect-out.tgz', '/other/pkg.tgz'],
+  ['/npm/redirect-in.tgz', '/npm/final.tgz'],
+  ['/npm/meta-redirect/1.0.0', '/other/meta.json'],
+])
 
 describe('registry credential scope', () => {
   let server: http.Server
@@ -20,18 +26,9 @@ describe('registry credential scope', () => {
     authorizations = []
     server = http.createServer((req, res) => {
       authorizations.push(req.headers.authorization)
-      if (req.url === '/npm/redirect-out.tgz') {
-        res.writeHead(302, { location: '/other/pkg.tgz' })
-        res.end()
-        return
-      }
-      if (req.url === '/npm/redirect-in.tgz') {
-        res.writeHead(302, { location: '/npm/final.tgz' })
-        res.end()
-        return
-      }
-      if (req.url === '/npm/meta-redirect/1.0.0') {
-        res.writeHead(302, { location: '/other/meta.json' })
+      const location = REDIRECTS.get(req.url!)
+      if (location != null) {
+        res.writeHead(302, { location })
         res.end()
         return
       }
@@ -43,12 +40,18 @@ describe('registry credential scope', () => {
       res.writeHead(200, { 'content-type': 'application/octet-stream' })
       res.end(body)
     })
-    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve)
+    })
     origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   })
 
   after(async () => {
-    await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve()
+      })
+    })
     fs.rmSync(dir, { recursive: true, force: true })
   })
 

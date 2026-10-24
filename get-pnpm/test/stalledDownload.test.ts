@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -36,13 +36,19 @@ describe('stalled tarball download', () => {
       }
       res.end(body)
     })
-    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve)
+    })
     origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   })
 
   after(async () => {
     server.closeAllConnections()
-    await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve()
+      })
+    })
     fs.rmSync(dir, { recursive: true, force: true })
   })
 

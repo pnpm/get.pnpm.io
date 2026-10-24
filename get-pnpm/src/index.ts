@@ -16,7 +16,7 @@ export { type DownloadExecutableOptions, downloadPnpmExecutable } from './downlo
 export { extractTarballMember } from './extractTarballMember.js'
 export { isMusl, platformPackageName, type Target } from './platformPackageName.js'
 export { DEFAULT_REGISTRY, registryFromEnv, type RequestHeaders, useCertificateAuthorities, useProxyFromEnv } from './registry.js'
-export { type Packument, majorVersion, resolveVersion } from './resolveVersion.js'
+export { majorVersion, type Packument, resolveVersion } from './resolveVersion.js'
 export { detectInstallOrigin, findShadowingPnpm, type InstallOrigin, pnpmHomeDir, renderShadowingPnpmWarning, type ShadowingPnpm } from './shadowingPnpm.js'
 export { renderUndoHint } from './undoHint.js'
 export { type PackageSignature, type SigningKey, verifyRegistrySignature } from './verifySignature.js'
@@ -116,6 +116,7 @@ export async function installPnpm (
   const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
   const onSignal = (): void => {
     removeTmpDir()
+    // eslint-disable-next-line n/no-process-exit -- a signal listener replaces the default handling, which would have ended the process
     process.exit(1)
   }
   for (const signal of signals) {
@@ -228,19 +229,7 @@ async function fetchPnpm (
       keys: opts.keys,
     })
 
-    // Settled, not `all`: a rejection there would leave the other fetch writing
-    // into the directory the `finally` below is about to remove.
-    const [platformResult, wrapperResult] = await Promise.allSettled([
-      fetchPackage(platformPkgName),
-      // v11 was the first release to keep files next to the executable; up to
-      // v10 the executable is self-contained and ships no `dist/`.
-      major >= 11 ? fetchPackage(wrapperPackageName(major)) : Promise.resolve(undefined),
-    ])
-    if (platformResult.status === 'rejected') throw platformResult.reason
-    if (wrapperResult.status === 'rejected') throw wrapperResult.reason
-    const platformPkg = platformResult.value
-    const wrapperPkg = wrapperResult.value
-
+    const { platformPkg, wrapperPkg } = await fetchPackages(fetchPackage, platformPkgName, major)
     const binPath = path.join(dest, executable)
     fs.renameSync(path.join(platformPkg.dir, executable), binPath)
     fs.chmodSync(binPath, 0o755)
@@ -255,6 +244,24 @@ async function fetchPnpm (
     // in it that does not belong in the installation.
     fs.rmSync(path.join(dest, UNPACK_DIR), { recursive: true, force: true })
   }
+}
+
+async function fetchPackages (
+  fetchPackage: (pkgName: string) => Promise<{ dir: string }>,
+  platformPkgName: string,
+  major: number
+): Promise<{ platformPkg: { dir: string }, wrapperPkg: { dir: string } | undefined }> {
+  // Settled, not `all`: a rejection there would leave the other fetch writing
+  // into the directory the caller is about to remove.
+  const [platformResult, wrapperResult] = await Promise.allSettled([
+    fetchPackage(platformPkgName),
+    // v11 was the first release to keep files next to the executable; up to
+    // v10 the executable is self-contained and ships no `dist/`.
+    major >= 11 ? fetchPackage(wrapperPackageName(major)) : Promise.resolve(undefined),
+  ])
+  if (platformResult.status === 'rejected') throw platformResult.reason
+  if (wrapperResult.status === 'rejected') throw wrapperResult.reason
+  return { platformPkg: platformResult.value, wrapperPkg: wrapperResult.value }
 }
 
 /**

@@ -6,8 +6,9 @@ import http from 'node:http'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
-import zlib from 'node:zlib'
+import type { Duplex } from 'node:stream'
 import { after, before, beforeEach, describe, test } from 'node:test'
+import zlib from 'node:zlib'
 
 import { downloadPnpmExecutable, platformPackageName } from '../lib/index.js'
 import type { SigningKey } from '../lib/verifySignature.js'
@@ -61,102 +62,23 @@ const PROXY_UNSUPPORTED = typeof (http as { setGlobalProxyFromEnv?: unknown }).s
 describe('downloadPnpmExecutable', () => {
   before(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'get-pnpm-exe-test-'))
-    const tarballs = {
+    tarballs = {
       ok: packTarball('ok', { [EXECUTABLE]: CONTENT }),
       empty: packTarball('empty', { 'README.md': 'nothing to run here\n' }),
       // Big enough to span several blocks, so cutting the tail leaves the
       // executable's declared size unmet rather than merely losing padding.
       truncated: truncate(packTarball('big', { [EXECUTABLE]: 'x'.repeat(5000) })),
     }
-    const bytesFor = (mode: Mode): Buffer => {
-      if (mode === 'no-executable') return fs.readFileSync(tarballs.empty)
-      if (mode === 'truncated') return fs.readFileSync(tarballs.truncated)
-      return fs.readFileSync(tarballs.ok)
-    }
-    const serveTarball = (res: http.ServerResponse): void => {
-      const bytes = bytesFor(mode)
-      res.writeHead(200, { 'content-type': 'application/octet-stream' })
-      res.end(mode === 'bad-tarball' ? Buffer.concat([bytes, Buffer.from('tampered')]) : bytes)
-    }
 
-    cdn = http.createServer(async (req, res) => {
-      if (tarballResetsRemaining > 0) {
-        tarballResetsRemaining--
-        req.socket.destroy()
-        return
-      }
-      cdnRequests.push({ path: req.url!, authorization: req.headers.authorization })
-      if (tarballEmptiesRemaining > 0) {
-        tarballEmptiesRemaining--
-        res.writeHead(200, { 'content-type': 'application/octet-stream' })
-        res.end()
-        return
-      }
-      if (tarballCutsRemaining > 0) {
-        tarballCutsRemaining--
-        const bytes = bytesFor(mode)
-        res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length })
-        res.write(bytes.subarray(0, bytes.length >> 1), () => { req.socket.destroy() })
-        return
-      }
-      if (cdnRequests.length === 2 && holdSecondTarball != null) await holdSecondTarball
-      serveTarball(res)
-    })
+    cdn = http.createServer(handleCdnRequest)
     await listen(cdn)
 
-    probe = http.createServer((req, res) => { res.end() })
+    probe = http.createServer((req, res) => {
+      res.end()
+    })
     await listen(probe)
 
-    server = http.createServer((req, res) => {
-      if (registryResetsRemaining > 0) {
-        registryResetsRemaining--
-        req.socket.destroy()
-        return
-      }
-      const url = decodeURIComponent(req.url!)
-      requests.push({ path: url, authorization: req.headers.authorization })
-      if (registryEmptiesRemaining > 0) {
-        registryEmptiesRemaining--
-        res.writeHead(200, { 'content-type': 'application/json' })
-        res.end()
-        return
-      }
-      const status = registryStatuses.shift()
-      if (status != null) {
-        res.writeHead(status)
-        res.end('not now')
-        return
-      }
-      if (url.endsWith(`/${VERSION}`)) {
-        // The registry may be served from a subpath, which is not part of the
-        // package name the signature covers.
-        const name = url.slice(1, url.lastIndexOf('/')).replace(/^npm\//, '')
-        const integrity = `sha512-${createHash('sha512').update(bytesFor(mode)).digest('base64')}`
-        // Signing a checksum other than the one served is what a tampered
-        // checksum looks like: bytes and metadata agree, the signature does not
-        // cover them.
-        const signed = mode === 'bad-signature' ? `sha512-${'A'.repeat(86)}==` : integrity
-        res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({
-          dist: {
-            // An npm URL is what a registry proxying npm hands back, and has to
-            // be re-hosted onto the registry that answered.
-            tarball: mode === 'npm-tarball-url'
-              ? `https://registry.npmjs.org/${name}/-/tarball.tgz`
-              : `${addressOf(cdn)}/${name}/-/tarball.tgz`,
-            ...(mode === 'no-integrity' ? {} : { integrity }),
-            signatures: mode === 'unsigned'
-              ? []
-              : [{
-                keyid: KEYS[0]!.keyid,
-                sig: createSign('SHA256').update(`${name}@${VERSION}:${signed}`).sign(privateKey, 'base64'),
-              }],
-          },
-        }))
-        return
-      }
-      serveTarball(res)
-    })
+    server = http.createServer(handleRegistryRequest)
     await listen(server)
     registry = `${addressOf(server)}/`
 
@@ -166,27 +88,8 @@ describe('downloadPnpmExecutable', () => {
     // record the origin reached. The relay gets an agent of its own, since the
     // global one is what the code under test points at the proxy, and the relay
     // would otherwise loop back through it to itself.
-    proxy = http.createServer((req, res) => {
-      const target = new URL(req.url!)
-      proxiedOrigins.push(target.host)
-      const relay = http.request(target, { method: req.method, headers: req.headers, agent: new http.Agent() }, (upstream) => {
-        res.writeHead(upstream.statusCode!, upstream.headers)
-        upstream.pipe(res)
-      })
-      req.pipe(relay)
-    })
-    proxy.on('connect', (req, socket, head) => {
-      proxiedOrigins.push(req.url!)
-      const { hostname, port } = new URL(`http://${req.url!}`)
-      const upstream = net.connect(Number(port), hostname, () => {
-        socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
-        upstream.write(head)
-        upstream.pipe(socket)
-        socket.pipe(upstream)
-      })
-      upstream.on('error', () => { socket.destroy() })
-      socket.on('error', () => { upstream.destroy() })
-    })
+    proxy = http.createServer(relayProxyRequest)
+    proxy.on('connect', tunnelProxyConnection)
     await listen(proxy)
   })
 
@@ -282,7 +185,9 @@ describe('downloadPnpmExecutable', () => {
     // route comes back only once the held download is done too. The probe is an
     // origin nothing has reached yet, so no pooled tunnel can hide the route.
     let release!: () => void
-    holdSecondTarball = new Promise((resolve) => { release = resolve })
+    holdSecondTarball = new Promise((resolve) => {
+      release = resolve
+    })
     await withEnv({ HTTP_PROXY: addressOf(proxy), NO_PROXY: undefined }, async () => {
       const downloads = [download(destIn('overlap-a')), download(destIn('overlap-b'))]
       await Promise.race(downloads)
@@ -501,6 +406,128 @@ describe('downloadPnpmExecutable', () => {
 })
 
 /** Runs `fn` with the proxy variables set as given, then puts them back. */
+let tarballs: { ok: string, empty: string, truncated: string }
+
+function bytesFor (mode: Mode): Buffer {
+  if (mode === 'no-executable') return fs.readFileSync(tarballs.empty)
+  if (mode === 'truncated') return fs.readFileSync(tarballs.truncated)
+  return fs.readFileSync(tarballs.ok)
+}
+
+function serveTarball (res: http.ServerResponse): void {
+  const bytes = bytesFor(mode)
+  res.writeHead(200, { 'content-type': 'application/octet-stream' })
+  res.end(mode === 'bad-tarball' ? Buffer.concat([bytes, Buffer.from('tampered')]) : bytes)
+}
+
+async function handleCdnRequest (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  if (tarballResetsRemaining > 0) {
+    tarballResetsRemaining--
+    req.socket.destroy()
+    return
+  }
+  cdnRequests.push({ path: req.url!, authorization: req.headers.authorization })
+  if (tarballEmptiesRemaining > 0) {
+    tarballEmptiesRemaining--
+    res.writeHead(200, { 'content-type': 'application/octet-stream' })
+    res.end()
+    return
+  }
+  if (tarballCutsRemaining > 0) {
+    tarballCutsRemaining--
+    const bytes = bytesFor(mode)
+    res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length })
+    res.write(bytes.subarray(0, bytes.length >> 1), () => {
+      req.socket.destroy()
+    })
+    return
+  }
+  if (cdnRequests.length === 2 && holdSecondTarball != null) await holdSecondTarball
+  serveTarball(res)
+}
+
+function handleRegistryRequest (req: http.IncomingMessage, res: http.ServerResponse): void {
+  if (registryResetsRemaining > 0) {
+    registryResetsRemaining--
+    req.socket.destroy()
+    return
+  }
+  const url = decodeURIComponent(req.url!)
+  requests.push({ path: url, authorization: req.headers.authorization })
+  if (registryEmptiesRemaining > 0) {
+    registryEmptiesRemaining--
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end()
+    return
+  }
+  const status = registryStatuses.shift()
+  if (status != null) {
+    res.writeHead(status)
+    res.end('not now')
+    return
+  }
+  if (url.endsWith(`/${VERSION}`)) {
+    // The registry may be served from a subpath, which is not part of the
+    // package name the signature covers.
+    const name = url.slice(1, url.lastIndexOf('/')).replace(/^npm\//, '')
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(versionMetaFor(name)))
+    return
+  }
+  serveTarball(res)
+}
+
+function versionMetaFor (name: string): unknown {
+  const integrity = `sha512-${createHash('sha512').update(bytesFor(mode)).digest('base64')}`
+  // Signing a checksum other than the one served is what a tampered
+  // checksum looks like: bytes and metadata agree, the signature does not
+  // cover them.
+  const signed = mode === 'bad-signature' ? `sha512-${'A'.repeat(86)}==` : integrity
+  return {
+    dist: {
+      // An npm URL is what a registry proxying npm hands back, and has to
+      // be re-hosted onto the registry that answered.
+      tarball: mode === 'npm-tarball-url'
+        ? `https://registry.npmjs.org/${name}/-/tarball.tgz`
+        : `${addressOf(cdn)}/${name}/-/tarball.tgz`,
+      ...(mode === 'no-integrity' ? {} : { integrity }),
+      signatures: mode === 'unsigned'
+        ? []
+        : [{
+          keyid: KEYS[0]!.keyid,
+          sig: createSign('SHA256').update(`${name}@${VERSION}:${signed}`).sign(privateKey, 'base64'),
+        }],
+    },
+  }
+}
+
+function relayProxyRequest (req: http.IncomingMessage, res: http.ServerResponse): void {
+  const target = new URL(req.url!)
+  proxiedOrigins.push(target.host)
+  const relay = http.request(target, { method: req.method, headers: req.headers, agent: new http.Agent() }, (upstream) => {
+    res.writeHead(upstream.statusCode!, upstream.headers)
+    upstream.pipe(res)
+  })
+  req.pipe(relay)
+}
+
+function tunnelProxyConnection (req: http.IncomingMessage, socket: Duplex, head: Buffer): void {
+  proxiedOrigins.push(req.url!)
+  const { hostname, port } = new URL(`http://${req.url!}`)
+  const upstream = net.connect(Number(port), hostname, () => {
+    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+    upstream.write(head)
+    upstream.pipe(socket)
+    socket.pipe(upstream)
+  })
+  upstream.on('error', () => {
+    socket.destroy()
+  })
+  socket.on('error', () => {
+    upstream.destroy()
+  })
+}
+
 async function withEnv (vars: Record<string, string | undefined>, fn: () => Promise<void>): Promise<void> {
   const names = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy']
   const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]))
@@ -564,11 +591,17 @@ function packTarball (name: string, files: Record<string, string>): string {
 }
 
 async function listen (target: http.Server): Promise<void> {
-  await new Promise<void>((resolve) => { target.listen(0, '127.0.0.1', resolve) })
+  await new Promise<void>((resolve) => {
+    target.listen(0, '127.0.0.1', resolve)
+  })
 }
 
 async function close (target: http.Server): Promise<void> {
-  await new Promise<void>((resolve) => { target.close(() => { resolve() }) })
+  await new Promise<void>((resolve) => {
+    target.close(() => {
+      resolve()
+    })
+  })
 }
 
 function addressOf (target: http.Server): string {

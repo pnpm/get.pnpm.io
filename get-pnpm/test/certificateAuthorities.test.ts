@@ -5,8 +5,8 @@ import fs from 'node:fs'
 import https from 'node:https'
 import os from 'node:os'
 import path from 'node:path'
-import tls from 'node:tls'
 import { after, before, describe, test } from 'node:test'
+import tls from 'node:tls'
 
 import { downloadPnpmExecutable, platformPackageName, useCertificateAuthorities } from '../lib/index.js'
 
@@ -48,13 +48,19 @@ describe('a registry behind a private CA', { skip: !ADDS_CAS_AFTER_STARTUP && 't
       res.writeHead(200, { 'content-type': 'application/octet-stream' })
       res.end(tarball)
     })
-    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve)
+    })
     registry = `https://127.0.0.1:${(server.address() as { port: number }).port}/`
   })
 
   after(async () => {
     server.closeAllConnections()
-    await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve()
+      })
+    })
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
