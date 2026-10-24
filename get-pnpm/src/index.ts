@@ -6,6 +6,7 @@ import path from 'node:path'
 import { extractTarball } from './extractTarball.js'
 import { registryConfigFromEnv } from './npmConfig.js'
 import { isMusl, platformPackageName } from './platformPackageName.js'
+import { readProjectPin } from './projectPin.js'
 import { downloadTarball, fetchPackument, fetchSignatures, fetchVersionMeta, type RequestHeaders, useCertificateAuthorities, useProxyFromEnv } from './registry.js'
 import { majorVersion, resolveVersion } from './resolveVersion.js'
 import { findShadowingPnpm, pnpmHomeDir, renderShadowingPnpmWarning } from './shadowingPnpm.js'
@@ -15,6 +16,7 @@ import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
 export { type DownloadExecutableOptions, downloadPnpmExecutable } from './downloadExecutable.js'
 export { extractTarballMember } from './extractTarballMember.js'
 export { isMusl, platformPackageName, type Target } from './platformPackageName.js'
+export { type ProjectPin, readProjectPin } from './projectPin.js'
 export { DEFAULT_REGISTRY, registryFromEnv, type RequestHeaders, useCertificateAuthorities, useProxyFromEnv } from './registry.js'
 export { majorVersion, type Packument, resolveVersion } from './resolveVersion.js'
 export { detectInstallOrigin, findShadowingPnpm, type InstallOrigin, pnpmHomeDir, renderShadowingPnpmWarning, type ShadowingPnpm } from './shadowingPnpm.js'
@@ -43,7 +45,13 @@ Installs pnpm as a standalone executable and adds it to your PATH.
 Arguments:
   version            An exact version (11.20.0), a major (12), a semver range
                      (^12.1.0), or a dist-tag (latest, next-12). Defaults to
-                     $PNPM_VERSION, then "latest".
+                     $PNPM_VERSION, then the version the project in the current
+                     directory pins, then "latest".
+
+                     The project's pin is read from devEngines.packageManager
+                     or packageManager in its package.json (the workspace
+                     root's, in a workspace). A range resolves to the version
+                     pnpm-lock.yaml records while that is still in range.
 
 Environment variables:
   PNPM_VERSION           Version to install when no argument is given.
@@ -79,9 +87,18 @@ export async function runCli (argv: string[]): Promise<number> {
   }
   const registryConfig = registryConfigFromEnv()
   return installPnpm({
-    versionSpec: positional[0] ?? process.env.PNPM_VERSION ?? 'latest',
+    versionSpec: positional[0] ?? process.env.PNPM_VERSION ?? projectVersionSpec(process.cwd()) ?? 'latest',
     ...registryConfig,
   })
+}
+
+/** The version `readProjectPin` finds for `dir`, saying where it comes from. */
+function projectVersionSpec (dir: string): string | undefined {
+  const pin = readProjectPin(dir)
+  if (pin == null) return undefined
+  const locked = pin.lockedVersion == null ? '' : `, locked to ${pin.lockedVersion} in pnpm-lock.yaml`
+  console.log(`==> ${pin.manifestPath} pins pnpm ${pin.spec} in ${pin.field}${locked}`)
+  return pin.lockedVersion ?? pin.spec
 }
 
 /**
