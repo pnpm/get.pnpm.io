@@ -159,6 +159,49 @@ function Get-AssetBasename {
 
 $NpmRegistry = 'https://registry.npmjs.org'
 
+# A reset connection or a 502 from a load balancer in front of the registry is
+# transient, and should not fail the whole install, least of all in CI. The
+# `get-pnpm` package and install.sh retry the same failures the same way.
+$DownloadAttempts = 3
+
+$DownloadOptions = @{ UseBasicParsing = $true }
+# PowerShell 7.4+ can abandon a connection that stopped sending, so that a
+# registry that stalled is retried instead of hanging the install. Earlier
+# versions have no such timeout.
+if ((Get-Command Invoke-WebRequest).Parameters.ContainsKey('OperationTimeoutSeconds')) {
+  $DownloadOptions.OperationTimeoutSeconds = 30
+}
+
+# Invoke-WebRequest, retrying a transient failure. A 4xx is not retried: it
+# means the request itself is wrong (a missing package, a bad version), except
+# for a request timeout and rate limiting, which say "not now" rather than "no".
+# -OutFile is rewritten from the start on each attempt.
+function Invoke-Download {
+  param(
+    [string]$Uri,
+    [string]$OutFile
+  )
+  $options = @{ Uri = $Uri } + $DownloadOptions
+  if ($OutFile) {
+    $options.OutFile = $OutFile
+  }
+  for ($attempt = 1; ; $attempt++) {
+    try {
+      return Invoke-WebRequest @options
+    } catch {
+      # No response at all, or one lost partway through, leaves no status.
+      $response = $_.Exception.Response
+      $status = if ($null -ne $response) { [int]$response.StatusCode } else { 0 }
+      $retryable = $status -eq 0 -or $status -eq 408 -or $status -eq 429 -or $status -ge 500
+      if (-not $retryable -or $attempt -ge $DownloadAttempts) {
+        throw
+      }
+      Write-Host "Retrying $Uri" -ForegroundColor Yellow
+      Start-Sleep -Seconds $attempt
+    }
+  }
+}
+
 # npm's registry signing key, mirrored from
 # https://registry.npmjs.org/-/npm/v1/keys. See the matching comment in
 # install.sh for why the key is pinned rather than fetched.
@@ -213,7 +256,7 @@ function Get-VerifiedPackage {
     [string]$Version,
     [string]$Destination
   )
-  $meta = (Invoke-WebRequest "$NpmRegistry/$Package/$Version" -UseBasicParsing).Content | ConvertFrom-Json
+  $meta = (Invoke-Download "$NpmRegistry/$Package/$Version").Content | ConvertFrom-Json
   $integrity = $meta.dist.integrity
   $signature = $meta.dist.signatures | Select-Object -First 1
   if (-not $integrity) {
@@ -234,7 +277,7 @@ function Get-VerifiedPackage {
   }
 
   $archive = Join-Path $Destination 'package.tgz'
-  Invoke-WebRequest $meta.dist.tarball -OutFile $archive -UseBasicParsing
+  Invoke-Download $meta.dist.tarball -OutFile $archive
   if ((Get-FileIntegrity -Path $archive) -ne $integrity) {
     throw "$Package@$Version does not match the checksum the npm registry published for it. Refusing to install."
   }
@@ -258,7 +301,7 @@ function Get-VerifiedPackage {
 
 # Tags come from `pnpm`: it is published for every release, whereas
 # `@pnpm/exe` is on its way out and would go stale.
-$pkgInfo = Invoke-WebRequest "$NpmRegistry/pnpm" -UseBasicParsing
+$pkgInfo = Invoke-Download "$NpmRegistry/pnpm"
 $versionJson = $pkgInfo.Content | ConvertFrom-Json
 $versions = Get-Member -InputObject $versionJson.versions -Type NoteProperty | Select-Object -ExpandProperty Name
 $distTags = Get-Member -InputObject $versionJson.'dist-tags' -Type NoteProperty | Select-Object -ExpandProperty Name
@@ -328,13 +371,13 @@ if ($majorVersion -ge 12) {
   if ($platform -eq 'win32') {
     $archiveUrl = "https://github.com/pnpm/pnpm/releases/download/v$version/$assetBase.zip"
     $tempArchive = Join-Path $tempFileFolder.FullName "pnpm.zip"
-    Invoke-WebRequest $archiveUrl -OutFile $tempArchive -UseBasicParsing
+    Invoke-Download $archiveUrl -OutFile $tempArchive
     Expand-Archive -Path $tempArchive -DestinationPath $tempFileFolder.FullName -Force
     $tempFile = Join-Path $tempFileFolder.FullName "pnpm.exe"
   } else {
     $archiveUrl = "https://github.com/pnpm/pnpm/releases/download/v$version/$assetBase.tar.gz"
     $tempArchive = Join-Path $tempFileFolder.FullName "pnpm.tar.gz"
-    Invoke-WebRequest $archiveUrl -OutFile $tempArchive -UseBasicParsing
+    Invoke-Download $archiveUrl -OutFile $tempArchive
     tar -xzf $tempArchive -C $tempFileFolder.FullName
     $tempFile = Join-Path $tempFileFolder.FullName "pnpm"
   }
@@ -347,7 +390,7 @@ if ($majorVersion -ge 12) {
     $archiveUrl = "$archiveUrl.exe"
   }
   $tempFile = Join-Path $tempFileFolder.FullName $pnpmName
-  Invoke-WebRequest $archiveUrl -OutFile $tempFile -UseBasicParsing
+  Invoke-Download $archiveUrl -OutFile $tempFile
 }
 
 Write-Host "Running setup...`n" -ForegroundColor Green

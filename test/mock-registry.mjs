@@ -27,6 +27,10 @@ const MUTATIONS = {
     ...meta,
     dist: { ...meta.dist, signatures: [{ ...meta.dist.signatures[0], keyid: 'SHA256:not-the-pinned-key' }] },
   }),
+  // Metadata and tarballs are served untouched, but the first request for each
+  // fails the way a flaky network does, so the install only succeeds if the
+  // installer retries.
+  flaky: (meta) => meta,
   'no-integrity': (meta) => {
     const dist = { ...meta.dist }
     delete dist.integrity
@@ -63,8 +67,18 @@ const json = (res, body) => {
   res.end(JSON.stringify(body))
 }
 
+const requested = new Set()
+
 createServer((req, res) => {
   const path = decodeURIComponent(req.url)
+  const firstRequest = !requested.has(path)
+  requested.add(path)
+
+  if (mode === 'flaky' && firstRequest && !path.startsWith('/tarball/')) {
+    res.writeHead(503)
+    res.end()
+    return
+  }
 
   if (path === `/${WRAPPER}`) {
     json(res, packument)
@@ -74,6 +88,12 @@ createServer((req, res) => {
   const tarballOf = path.startsWith('/tarball/') && packages.get(decodeURIComponent(path.slice('/tarball/'.length)))
   if (tarballOf) {
     const { tarball } = tarballOf
+    if (mode === 'flaky' && firstRequest) {
+      // A connection lost partway through the body.
+      res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': tarball.length })
+      res.write(tarball.subarray(0, tarball.length >> 1), () => { res.destroy() })
+      return
+    }
     res.writeHead(200, { 'content-type': 'application/octet-stream' })
     res.end(mode === 'bad-tarball' ? Buffer.concat([tarball, Buffer.from('tampered')]) : tarball)
     return
