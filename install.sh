@@ -34,14 +34,14 @@ DOWNLOAD_ATTEMPTS=3
 # stdout cannot be rewound, so a connection lost partway through would leave
 # half a body for the next attempt to append to.
 download() {
-  local file attempt status
+  local file attempt result
   file="$(mktemp)" || return 1
   attempt=1
   while :; do
     download_once "$1" "$file"
-    status=$?
-    [ "$status" -eq 0 ] && break
-    if [ "$status" -eq 2 ] || [ "$attempt" -ge "$DOWNLOAD_ATTEMPTS" ]; then
+    result=$?
+    [ "$result" -eq 0 ] && break
+    if [ "$result" -eq 2 ] || [ "$attempt" -ge "$DOWNLOAD_ATTEMPTS" ]; then
       rm -f "$file"
       return 1
     fi
@@ -50,9 +50,9 @@ download() {
     attempt=$((attempt + 1))
   done
   cat "$file"
-  status=$?
+  result=$?
   rm -f "$file"
-  return "$status"
+  return "$result"
 }
 
 # Download <url> to <file>. Returns 2 for a failure that retrying cannot help
