@@ -38,22 +38,20 @@ function wrapperPackageName (major: number): string {
   return major >= 12 ? CLI_PKG_NAME : '@pnpm/exe'
 }
 
-const USAGE = `Usage: npx get-pnpm [version | --project]
+const USAGE = `Usage: npx get-pnpm [version]
 
 Installs pnpm as a standalone executable and adds it to your PATH.
 
 Arguments:
   version            An exact version (11.20.0), a major (12), a semver range
                      (^12.1.0), or a dist-tag (latest, next-12). Defaults to
-                     $PNPM_VERSION, then "latest".
+                     $PNPM_VERSION, then the version the project in the current
+                     directory pins, then "latest".
 
-Options:
-  --project          Install the version the project in the current directory
-                     pins, from devEngines.packageManager or packageManager in
-                     its package.json (the workspace root's, in a workspace).
-                     A range resolves to the version pnpm-lock.yaml records
-                     while it is in range. Takes precedence over $PNPM_VERSION.
-  -h, --help         Print this help.
+                     The project's pin is read from devEngines.packageManager
+                     or packageManager in its package.json (the workspace
+                     root's, in a workspace). A range resolves to the version
+                     pnpm-lock.yaml records while that is still in range.
 
 Environment variables:
   PNPM_VERSION           Version to install when no argument is given.
@@ -73,31 +71,31 @@ Environment variables:
 `
 
 export async function runCli (argv: string[]): Promise<number> {
-  if (argv.includes('--help') || argv.includes('-h')) {
-    console.log(USAGE)
-    return 0
+  const positional: string[] = []
+  for (const arg of argv) {
+    if (arg === '--help' || arg === '-h') {
+      console.log(USAGE)
+      return 0
+    }
+    if (arg.startsWith('-')) {
+      throw new Error(`Unknown option "${arg}".\n\n${USAGE}`)
+    }
+    positional.push(arg)
   }
-  const unknown = argv.find((arg) => arg.startsWith('-') && arg !== '--project')
-  if (unknown != null) {
-    throw new Error(`Unknown option "${unknown}".\n\n${USAGE}`)
-  }
-  const fromProject = argv.includes('--project')
-  const positional = argv.filter((arg) => !arg.startsWith('-'))
-  if (positional.length > (fromProject ? 0 : 1)) {
-    throw new Error(fromProject
-      ? `--project reads the version from the project, so it takes no version argument.\n\n${USAGE}`
-      : `Expected at most one version, got ${positional.length}.\n\n${USAGE}`)
+  if (positional.length > 1) {
+    throw new Error(`Expected at most one version, got ${positional.length}.\n\n${USAGE}`)
   }
   const registryConfig = registryConfigFromEnv()
   return installPnpm({
-    versionSpec: fromProject ? projectVersionSpec(process.cwd()) : positional[0] ?? process.env.PNPM_VERSION ?? 'latest',
+    versionSpec: positional[0] ?? process.env.PNPM_VERSION ?? projectVersionSpec(process.cwd()) ?? 'latest',
     ...registryConfig,
   })
 }
 
 /** The version `readProjectPin` finds for `dir`, saying where it comes from. */
-function projectVersionSpec (dir: string): string {
+function projectVersionSpec (dir: string): string | undefined {
   const pin = readProjectPin(dir)
+  if (pin == null) return undefined
   const locked = pin.lockedVersion == null ? '' : `, locked to ${pin.lockedVersion} in pnpm-lock.yaml`
   console.log(`==> ${pin.manifestPath} pins pnpm ${pin.spec} in ${pin.field}${locked}`)
   return pin.lockedVersion ?? pin.spec

@@ -23,19 +23,14 @@ npx get-pnpm 11.20.0    # an exact version
 npx get-pnpm "^12.1.0"  # the version npm would install for a range
 ```
 
-Or install the version the project in the current directory pins, which saves CI
-and Docker builds from naming it twice:
-
-```sh
-npx get-pnpm --project
-```
-
-It reads `devEngines.packageManager`, or else `packageManager`, from the project's
-`package.json` — the workspace root's, in a workspace — the way pnpm reads it to
-switch versions. A range resolves to the version `pnpm-lock.yaml` records while it
-is still in range, so the pnpm installed is the one the project then runs, with
-no second download. Without `--project`, the project's pin is left to pnpm, which
-switches to it on its own.
+Without a version, and without `PNPM_VERSION`, it installs the version the project
+in the current directory pins, so CI and Docker builds do not have to name it a
+second time. It reads `devEngines.packageManager`, or else `packageManager`, from
+the project's `package.json` (the workspace root's, in a workspace) the way pnpm
+reads it to switch versions. A range resolves to the version `pnpm-lock.yaml`
+records while that is still in range, so the pnpm installed is the one the project
+then runs, with no second download. Outside a project, or in one that pins no
+pnpm, it installs `latest`.
 
 Then open a new terminal, or source the file the installer names in its output.
 

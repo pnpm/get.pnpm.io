@@ -32,18 +32,20 @@ const MANIFEST_NAMES = ['package.json', 'package.json5', 'package.yaml']
  * `opts.root` stops the search for both at that directory, such as the root
  * of a checkout, which keeps a workspace that happens to sit above it out.
  *
- * @throws if there is no manifest, or it pins no pnpm version.
+ * @returns `undefined` when there is no pnpm pin to read: no manifest, one
+ * that pins no package manager or another one, or a `package.json5` or
+ * `package.yaml`, which would each take a parser of their own.
+ * @throws if the manifest pins pnpm in a way pnpm itself would reject.
  */
-export function readProjectPin (dir: string, opts: { root?: string } = {}): ProjectPin {
+export function readProjectPin (dir: string, opts: { root?: string } = {}): ProjectPin | undefined {
   const start = path.resolve(dir)
   const root = opts.root == null ? undefined : path.resolve(opts.root)
   const workspaceDir = findUp(start, root, (candidate) => fs.existsSync(path.join(candidate, 'pnpm-workspace.yaml')))
   const projectDir = findUp(start, root, (candidate) => MANIFEST_NAMES.some((name) => fs.existsSync(path.join(candidate, name))))
   const manifest = readManifest(workspaceDir ?? projectDir)
-  if (manifest == null) {
-    throw new Error(`No package.json was found in ${start} or above it, so there is no pinned pnpm version to read.`)
-  }
-  const pin = { ...wantedPnpm(manifest), manifestPath: manifest.path }
+  const wanted = manifest == null ? undefined : wantedPnpm(manifest)
+  if (wanted == null) return undefined
+  const pin = { ...wanted, manifestPath: manifest!.path }
   if (semver.valid(pin.spec) != null) return pin
   const lockfileDir = workspaceDir != null && sharesNoLockfile(workspaceDir) ? projectDir : workspaceDir ?? projectDir
   const lockedVersion = lockfileDir == null ? undefined : lockedPnpmVersion(lockfileDir, pin.spec)
@@ -61,10 +63,7 @@ function readManifest (dir: string | undefined): Manifest | undefined {
     const manifestPath = path.join(dir, name)
     const content = readOptionalFile(manifestPath)
     if (content == null) continue
-    // Each would take a parser of its own, for manifests that are rare.
-    if (name !== 'package.json') {
-      throw new Error(`${manifestPath} cannot be read here. Pass the pnpm version it pins as an argument instead.`)
-    }
+    if (name !== 'package.json') return undefined
     const value = parseJson(manifestPath, content)
     if (!isRecord(value)) throw new Error(`${manifestPath} does not hold an object.`)
     return { path: manifestPath, value }
@@ -81,23 +80,25 @@ function parseJson (file: string, content: string): unknown {
   }
 }
 
-function wantedPnpm (manifest: Manifest): Pick<ProjectPin, 'spec' | 'field'> {
+function wantedPnpm (manifest: Manifest): Pick<ProjectPin, 'spec' | 'field'> | undefined {
   const engine = devEnginesPackageManager(manifest.value)
-  if (engine != null) {
-    assertPnpm(manifest, engine.name)
-    if (typeof engine.version !== 'string' || semver.validRange(engine.version) == null) {
-      throw new Error(`${manifest.path} names pnpm in devEngines.packageManager, but no version or range of it.`)
-    }
-    return { spec: engine.version, field: 'devEngines.packageManager' }
-  }
+  if (engine != null) return engine.name === 'pnpm' ? devEnginesPin(manifest, engine.version) : undefined
   const { packageManager } = manifest.value
-  if (typeof packageManager !== 'string') {
-    throw new Error(`${manifest.path} pins no pnpm version: it sets neither devEngines.packageManager nor packageManager.`)
+  return typeof packageManager === 'string' ? packageManagerPin(manifest, packageManager) : undefined
+}
+
+function devEnginesPin (manifest: Manifest, version: unknown): Pick<ProjectPin, 'spec' | 'field'> {
+  if (typeof version !== 'string' || semver.validRange(version) == null) {
+    throw new Error(`${manifest.path} names pnpm in devEngines.packageManager, but no version or range of it.`)
   }
+  return { spec: version, field: 'devEngines.packageManager' }
+}
+
+function packageManagerPin (manifest: Manifest, packageManager: string): Pick<ProjectPin, 'spec' | 'field'> | undefined {
   // `pnpm@12.1.0+sha512.<hash>`: the build names the artifact Corepack downloaded,
   // not a pnpm release.
   const separator = packageManager.lastIndexOf('@')
-  assertPnpm(manifest, separator > 0 ? packageManager.slice(0, separator) : packageManager)
+  if (separator <= 0 || packageManager.slice(0, separator) !== 'pnpm') return undefined
   const version = packageManager.slice(separator + 1).split('+')[0]!
   if (semver.valid(version) !== version) {
     throw new Error(`${manifest.path} sets packageManager to "${packageManager}", which pins no exact pnpm version.`)
@@ -111,12 +112,6 @@ function devEnginesPackageManager (manifest: Record<string, unknown>): Record<st
   if (!Array.isArray(declared)) return isRecord(declared) ? declared : undefined
   const entries = declared.filter(isRecord)
   return entries.find((entry) => entry.name === 'pnpm') ?? entries[0]
-}
-
-function assertPnpm (manifest: Manifest, name: unknown): void {
-  if (name !== 'pnpm') {
-    throw new Error(`${manifest.path} declares ${typeof name === 'string' ? name : 'another package manager'} as its package manager, not pnpm.`)
-  }
 }
 
 /** Whether every project of the workspace keeps a lockfile of its own. */
