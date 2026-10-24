@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import http from 'node:http'
 import { pipeline } from 'node:stream/promises'
+import tls from 'node:tls'
 
 import type { Packument } from './resolveVersion.js'
 import type { PackageSignature } from './verifySignature.js'
@@ -81,6 +82,45 @@ export function useProxyFromEnv (): () => void {
 
 let proxyUsers = 0
 let restoreProxy: () => void = () => {}
+
+/**
+ * Adds `ca`, PEM certificates, to the CAs every TLS connection trusts until
+ * the returned function is called. Node.js's own CAs stay trusted, so a
+ * download host the registry names stays reachable.
+ *
+ * `fetch` takes no CA of its own, so this is process-global, like the proxy:
+ * overlapping calls each add theirs, and the defaults come back once the last
+ * returned function has run. A connection or TLS session opened while the CAs
+ * were trusted can still be reused after that.
+ *
+ * Node.js before 22.19 and 24.5 cannot add a CA after startup, so there it only
+ * says to use `NODE_EXTRA_CA_CERTS`.
+ */
+export function useCertificateAuthorities (ca: readonly string[] = []): () => void {
+  if (ca.length === 0) return () => {}
+  if (typeof tls.setDefaultCACertificates !== 'function') {
+    console.warn(`Node.js ${process.version} cannot trust the CA certificates of the npm config after startup. Set NODE_EXTRA_CA_CERTS to a file holding them instead.`)
+    return () => {}
+  }
+  const added = [...ca]
+  const builtIn = defaultCertificates ?? tls.getCACertificates('default')
+  try {
+    tls.setDefaultCACertificates([...builtIn, ...[...addedCertificates, added].flat()])
+  } catch (err) {
+    throw new Error(`Could not trust the CA certificates of the npm config: ${(err as Error).message}`, { cause: err })
+  }
+  defaultCertificates = builtIn
+  addedCertificates.add(added)
+  return () => {
+    if (!addedCertificates.delete(added)) return
+    tls.setDefaultCACertificates([...builtIn, ...[...addedCertificates].flat()])
+    if (addedCertificates.size === 0) defaultCertificates = undefined
+  }
+}
+
+/** What `tls` trusted before the first active {@link useCertificateAuthorities} call. */
+let defaultCertificates: string[] | undefined
+const addedCertificates = new Set<string[]>()
 
 // Node's fetch applies no timeout of its own: a registry that accepts the
 // connection and then stalls would hang the install with no output. Metadata is

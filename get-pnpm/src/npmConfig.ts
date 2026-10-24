@@ -22,27 +22,43 @@ interface NpmrcCandidate {
   path: string
 }
 
+/** The settings of one config source, in file order. */
+interface ConfigSource {
+  /** What a relative `cafile` in this source is resolved against. */
+  dir: string
+  entries: Array<[string, string]>
+}
+
 export interface RegistryConfig {
   authPath?: string
+  /** PEM certificates of the CAs the npm config names for `registry`. */
+  ca?: string[]
   headers?: RequestHeaders
   registry: string
 }
 
 export function registryConfigFromEnv (opts: RegistryConfigOptions = {}): RegistryConfig {
   const env = opts.env ?? process.env
+  const cwd = opts.cwd ?? process.cwd()
   const rawRegistry = env.npm_config_registry ?? env.NPM_CONFIG_REGISTRY ?? DEFAULT_REGISTRY
   const embedded = registryAndEmbeddedAuth(rawRegistry)
-  if (embedded.headers != null) return embedded
-
   const registry = embedded.registry
-  const token = mostSpecificToken([
-    registryTokenFromEnv(registry, env),
-    ...projectNpmrcs(opts.cwd ?? process.cwd(), env)
-      .map((candidate) => registryTokenFromNpmrc(registry, candidate, env)),
-    registryTokenFromNpmrc(registry, userNpmrc(opts, env), env),
-    registryTokenFromNpmrc(registry, globalNpmrc(opts, env), env),
-  ])
+  // Highest precedence first, as npm layers them.
+  const sources = [
+    envSource(env, cwd),
+    ...[
+      ...projectNpmrcs(cwd, env),
+      userNpmrc(opts, env),
+      globalNpmrc(opts, env),
+    ].map((candidate) => readNpmrc(candidate, env)),
+  ]
+  const ca = certificateAuthorities(registry, sources)
+  const auth = embedded.headers != null ? embedded : tokenAuth(registry, sources)
+  return { ...auth, ...(ca.length > 0 ? { ca } : {}) }
+}
 
+function tokenAuth (registry: string, sources: ConfigSource[]): RegistryConfig {
+  const token = mostSpecificToken(sources.map((source) => tokenForRegistry(registry, source.entries)))
   return token == null
     ? { registry }
     : {
@@ -69,26 +85,29 @@ function registryAndEmbeddedAuth (rawRegistry: string): RegistryConfig {
   }
 }
 
-function registryTokenFromEnv (registry: string, env: NodeJS.ProcessEnv): RegistryToken | undefined {
+/**
+ * The `npm_config_*` variables. npm sets them for the programs it runs, a
+ * `ca` array joined into one value.
+ */
+function envSource (env: NodeJS.ProcessEnv, cwd: string): ConfigSource {
   const entries: Array<[string, string]> = []
   for (const [name, value] of Object.entries(env)) {
     if (value == null || !name.toLowerCase().startsWith('npm_config_')) continue
-    entries.push([name.slice('npm_config_'.length), value])
+    const key = name.slice('npm_config_'.length)
+    // npm's own names are lowercase; only a URL-scoped key keeps its case.
+    entries.push([key.startsWith('//') ? key : key.toLowerCase(), value])
   }
-  return tokenForRegistry(registry, entries)
+  return { dir: cwd, entries }
 }
 
-function registryTokenFromNpmrc (
-  registry: string,
-  npmrc: NpmrcCandidate,
-  env: NodeJS.ProcessEnv
-): RegistryToken | undefined {
+function readNpmrc (npmrc: NpmrcCandidate, env: NodeJS.ProcessEnv): ConfigSource {
+  const dir = path.dirname(npmrc.path)
   let text: string
   try {
     text = fs.readFileSync(npmrc.path, 'utf8')
   } catch (err) {
-    if (isErrno(err, 'ENOENT')) return undefined
-    if (npmrc.ignoreUnreadable && isUnreadableNpmrcError(err)) return undefined
+    if (isErrno(err, 'ENOENT')) return { dir, entries: [] }
+    if (npmrc.ignoreUnreadable && isUnreadableNpmrcError(err)) return { dir, entries: [] }
     throw err
   }
 
@@ -103,7 +122,7 @@ function registryTokenFromNpmrc (
     const value = expandEnv(rawValue, env)
     if (value != null) entries.push([key, value])
   }
-  return tokenForRegistry(registry, entries)
+  return { dir, entries }
 }
 
 function tokenForRegistry (registry: string, entries: Array<[string, string]>): RegistryToken | undefined {
@@ -139,7 +158,65 @@ function mostSpecificToken (candidates: Array<RegistryToken | undefined>): Regis
 }
 
 function authTokenScope (key: string, protocol: string): { host: string, pathname: string } | undefined {
-  const suffix = ':_authtoken'
+  return registryScope(key, ':_authtoken', protocol)
+}
+
+/**
+ * The CA certificates the config adds for `registry`: those of the
+ * highest-precedence source that sets a top-level `ca`, `ca[]`, or `cafile`,
+ * and those scoped to the longest `//host/path/` prefix of `registry`. A
+ * `cafile` that cannot be read adds nothing, as in pnpm.
+ */
+function certificateAuthorities (registry: string, sources: ConfigSource[]): string[] {
+  const topLevel = sources.find((source) => source.entries.some(([key]) => CA_SETTINGS.includes(key)))
+  const settings: CaSetting[] = (topLevel?.entries ?? [])
+    .filter(([key]) => CA_SETTINGS.includes(key))
+    .map(([setting, value]) => ({ dir: topLevel!.dir, setting, value }))
+  settings.push(...scopedCaSettings(registry, sources))
+  return settings.flatMap(({ dir, setting, value }) => pemCertificates(
+    setting === 'cafile' ? readCaFile(path.resolve(dir, value)) : value.replaceAll('\\n', '\n')
+  ))
+}
+
+const CA_SETTINGS = ['ca', 'ca[]', 'cafile']
+
+interface CaSetting {
+  dir: string
+  setting: string
+  value: string
+}
+
+/** A longer prefix wins; at equal length, the higher-precedence source does. */
+function scopedCaSettings (registry: string, sources: ConfigSource[]): CaSetting[] {
+  const registryUrl = new URL(registry)
+  const scoped = sources.flatMap((source, sourceIndex) => source.entries.flatMap(([key, value]) => {
+    if (value === '') return []
+    for (const setting of CA_SETTINGS) {
+      const scope = registryScope(key, `:${setting}`, registryUrl.protocol)
+      if (scope == null) continue
+      if (scope.host !== registryUrl.host.toLowerCase() || !registryUrl.pathname.startsWith(scope.pathname)) return []
+      return [{ sourceIndex, pathname: scope.pathname, dir: source.dir, setting, value }]
+    }
+    return []
+  }))
+  const longest = Math.max(...scoped.map(({ pathname }) => pathname.length))
+  const winner = scoped.find(({ pathname }) => pathname.length === longest)
+  return scoped.filter(({ sourceIndex, pathname }) => sourceIndex === winner?.sourceIndex && pathname.length === longest)
+}
+
+function readCaFile (file: string): string {
+  try {
+    return fs.readFileSync(file, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+function pemCertificates (text: string): string[] {
+  return text.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g) ?? []
+}
+
+function registryScope (key: string, suffix: string, protocol: string): { host: string, pathname: string } | undefined {
   const lower = key.toLowerCase()
   if (!lower.endsWith(suffix)) return undefined
   const rawScope = key.slice(0, -suffix.length)
