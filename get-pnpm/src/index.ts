@@ -6,6 +6,7 @@ import path from 'node:path'
 import { extractTarball } from './extractTarball.js'
 import { registryConfigFromEnv } from './npmConfig.js'
 import { isMusl, platformPackageName } from './platformPackageName.js'
+import { readProjectPin } from './projectPin.js'
 import { downloadTarball, fetchPackument, fetchSignatures, fetchVersionMeta, type RequestHeaders, useCertificateAuthorities, useProxyFromEnv } from './registry.js'
 import { majorVersion, resolveVersion } from './resolveVersion.js'
 import { findShadowingPnpm, pnpmHomeDir, renderShadowingPnpmWarning } from './shadowingPnpm.js'
@@ -15,6 +16,7 @@ import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
 export { type DownloadExecutableOptions, downloadPnpmExecutable } from './downloadExecutable.js'
 export { extractTarballMember } from './extractTarballMember.js'
 export { isMusl, platformPackageName, type Target } from './platformPackageName.js'
+export { type ProjectPin, readProjectPin } from './projectPin.js'
 export { DEFAULT_REGISTRY, registryFromEnv, type RequestHeaders, useCertificateAuthorities, useProxyFromEnv } from './registry.js'
 export { majorVersion, type Packument, resolveVersion } from './resolveVersion.js'
 export { detectInstallOrigin, findShadowingPnpm, type InstallOrigin, pnpmHomeDir, renderShadowingPnpmWarning, type ShadowingPnpm } from './shadowingPnpm.js'
@@ -36,7 +38,7 @@ function wrapperPackageName (major: number): string {
   return major >= 12 ? CLI_PKG_NAME : '@pnpm/exe'
 }
 
-const USAGE = `Usage: npx get-pnpm [version]
+const USAGE = `Usage: npx get-pnpm [version | --project]
 
 Installs pnpm as a standalone executable and adds it to your PATH.
 
@@ -44,6 +46,14 @@ Arguments:
   version            An exact version (11.20.0), a major (12), a semver range
                      (^12.1.0), or a dist-tag (latest, next-12). Defaults to
                      $PNPM_VERSION, then "latest".
+
+Options:
+  --project          Install the version the project in the current directory
+                     pins, from devEngines.packageManager or packageManager in
+                     its package.json (the workspace root's, in a workspace).
+                     A range resolves to the version pnpm-lock.yaml records
+                     while it is in range. Takes precedence over $PNPM_VERSION.
+  -h, --help         Print this help.
 
 Environment variables:
   PNPM_VERSION           Version to install when no argument is given.
@@ -63,25 +73,34 @@ Environment variables:
 `
 
 export async function runCli (argv: string[]): Promise<number> {
-  const positional: string[] = []
-  for (const arg of argv) {
-    if (arg === '--help' || arg === '-h') {
-      console.log(USAGE)
-      return 0
-    }
-    if (arg.startsWith('-')) {
-      throw new Error(`Unknown option "${arg}".\n\n${USAGE}`)
-    }
-    positional.push(arg)
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log(USAGE)
+    return 0
   }
-  if (positional.length > 1) {
-    throw new Error(`Expected at most one version, got ${positional.length}.\n\n${USAGE}`)
+  const unknown = argv.find((arg) => arg.startsWith('-') && arg !== '--project')
+  if (unknown != null) {
+    throw new Error(`Unknown option "${unknown}".\n\n${USAGE}`)
+  }
+  const fromProject = argv.includes('--project')
+  const positional = argv.filter((arg) => !arg.startsWith('-'))
+  if (positional.length > (fromProject ? 0 : 1)) {
+    throw new Error(fromProject
+      ? `--project reads the version from the project, so it takes no version argument.\n\n${USAGE}`
+      : `Expected at most one version, got ${positional.length}.\n\n${USAGE}`)
   }
   const registryConfig = registryConfigFromEnv()
   return installPnpm({
-    versionSpec: positional[0] ?? process.env.PNPM_VERSION ?? 'latest',
+    versionSpec: fromProject ? projectVersionSpec(process.cwd()) : positional[0] ?? process.env.PNPM_VERSION ?? 'latest',
     ...registryConfig,
   })
+}
+
+/** The version `readProjectPin` finds for `dir`, saying where it comes from. */
+function projectVersionSpec (dir: string): string {
+  const pin = readProjectPin(dir)
+  const locked = pin.lockedVersion == null ? '' : `, locked to ${pin.lockedVersion} in pnpm-lock.yaml`
+  console.log(`==> ${pin.manifestPath} pins pnpm ${pin.spec} in ${pin.field}${locked}`)
+  return pin.lockedVersion ?? pin.spec
 }
 
 /**
