@@ -65,11 +65,20 @@ function readManifest (dir: string | undefined): Manifest | undefined {
     if (name !== 'package.json') {
       throw new Error(`${manifestPath} cannot be read here. Pass the pnpm version it pins as an argument instead.`)
     }
-    const value: unknown = JSON.parse(content)
+    const value = parseJson(manifestPath, content)
     if (!isRecord(value)) throw new Error(`${manifestPath} does not hold an object.`)
     return { path: manifestPath, value }
   }
   return undefined
+}
+
+function parseJson (file: string, content: string): unknown {
+  try {
+    // Windows tools write a byte order mark, which pnpm reads past.
+    return JSON.parse(content.replace(/^\uFEFF/, ''))
+  } catch (err) {
+    throw new Error(`${file} is not valid JSON: ${(err as Error).message}`, { cause: err })
+  }
 }
 
 function wantedPnpm (manifest: Manifest): Pick<ProjectPin, 'spec' | 'field'> {

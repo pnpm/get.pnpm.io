@@ -86,6 +86,18 @@ describe('readProjectPin', () => {
     assert.throws(() => pinOf(yaml), /package\.yaml cannot be read here/)
   })
 
+  test('reads a manifest that starts with a byte order mark', () => {
+    const dir = project({ 'package.json': `\uFEFF${manifest({ packageManager: 'pnpm@12.1.0' })}` })
+
+    assert.equal(pinOf(dir).spec, '12.1.0')
+  })
+
+  test('names the manifest that is not valid JSON', () => {
+    const dir = project({ 'package.json': '{ "packageManager": ' })
+
+    assert.throws(() => pinOf(dir), (err: Error) => err.message.startsWith(`${path.join(dir, 'package.json')} is not valid JSON:`))
+  })
+
   test('reads the manifest of the nearest project above the directory', () => {
     const dir = project({ 'package.json': manifest({ packageManager: 'pnpm@12.1.0' }), 'src/lib/.keep': '' })
 
