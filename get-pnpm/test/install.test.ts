@@ -22,7 +22,7 @@ const KEYS: SigningKey[] = [{
 }]
 
 /** One thing broken per run, to drive each refusal separately. */
-type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'unsigned' | 'wrong-keyid' | 'no-integrity' | 'npm-tarball-url'
+type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'unsigned' | 'root-signatures' | 'wrong-keyid' | 'no-integrity' | 'npm-tarball-url'
 
 let tmpDir: string
 let server: http.Server
@@ -136,6 +136,11 @@ describe('installPnpm', { skip: process.platform === 'win32' }, () => {
     await assert.rejects(install, /carries no npm registry signature/)
   })
 
+  test('takes the signatures from the package document when the version document has none', async () => {
+    mode = 'root-signatures'
+    assert.equal(await install(), 0)
+  })
+
   test('refuses a package signed with a key that is not pinned', async () => {
     mode = 'wrong-keyid'
     await assert.rejects(install, /unexpected npm key/)
@@ -160,10 +165,6 @@ function handleRequest (req: http.IncomingMessage, res: http.ServerResponse, tar
     res.end(JSON.stringify(body))
   }
 
-  if (url === '/pnpm') {
-    json({ 'dist-tags': { latest: VERSION }, versions: { [VERSION]: {} } })
-    return
-  }
   if (url.endsWith(`/${VERSION}`)) {
     const kind = url === `/pnpm/${VERSION}` ? 'pnpm' : 'platform'
     const name = url.slice(1, url.lastIndexOf('/'))
@@ -176,17 +177,26 @@ function handleRequest (req: http.IncomingMessage, res: http.ServerResponse, tar
     res.end(mode === 'bad-tarball' ? Buffer.concat([bytes, Buffer.from('tampered')]) : bytes)
     return
   }
-  res.writeHead(404)
-  res.end()
+  if (url.endsWith('.tgz')) {
+    res.writeHead(404)
+    res.end()
+    return
+  }
+  json(packumentFor(url.slice(1), tarballs))
+}
+
+function packumentFor (name: string, tarballs: Tarballs): unknown {
+  const kind = name === 'pnpm' ? 'pnpm' : 'platform'
+  return {
+    'dist-tags': { latest: VERSION },
+    versions: {
+      [VERSION]: mode === 'root-signatures' ? { dist: { signatures: signaturesFor(name, kind, tarballs) } } : {},
+    },
+  }
 }
 
 function versionMetaFor (name: string, kind: keyof Tarballs, tarballs: Tarballs): unknown {
-  const bytes = fs.readFileSync(tarballs[kind])
-  const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`
-  // Signing a different checksum than the one served is what a tampered
-  // checksum looks like: the bytes and the metadata agree, the signature
-  // does not cover them.
-  const signed = mode === 'bad-signature' ? `sha512-${'A'.repeat(86)}==` : integrity
+  const integrity = integrityOf(kind, tarballs)
   return {
     dist: {
       // An npm URL is what a registry proxying npm hands back, and has
@@ -195,14 +205,26 @@ function versionMetaFor (name: string, kind: keyof Tarballs, tarballs: Tarballs)
         ? `https://registry.npmjs.org/${kind}.tgz`
         : `${registry}${kind}.tgz`,
       ...(mode === 'no-integrity' ? {} : { integrity }),
-      signatures: mode === 'unsigned'
-        ? []
-        : [{
-          keyid: mode === 'wrong-keyid' ? 'SHA256:not-pinned' : KEYS[0]!.keyid,
-          sig: createSign('SHA256').update(`${name}@${VERSION}:${signed}`).sign(privateKey, 'base64'),
-        }],
+      // A proxy that strips the signatures here leaves them in the package document.
+      ...(mode === 'root-signatures' ? {} : { signatures: signaturesFor(name, kind, tarballs) }),
     },
   }
+}
+
+function signaturesFor (name: string, kind: keyof Tarballs, tarballs: Tarballs): unknown[] {
+  if (mode === 'unsigned') return []
+  // Signing a different checksum than the one served is what a tampered
+  // checksum looks like: the bytes and the metadata agree, the signature
+  // does not cover them.
+  const signed = mode === 'bad-signature' ? `sha512-${'A'.repeat(86)}==` : integrityOf(kind, tarballs)
+  return [{
+    keyid: mode === 'wrong-keyid' ? 'SHA256:not-pinned' : KEYS[0]!.keyid,
+    sig: createSign('SHA256').update(`${name}@${VERSION}:${signed}`).sign(privateKey, 'base64'),
+  }]
+}
+
+function integrityOf (kind: keyof Tarballs, tarballs: Tarballs): string {
+  return `sha512-${createHash('sha512').update(fs.readFileSync(tarballs[kind])).digest('base64')}`
 }
 
 function leftoverTmpDirs (): string[] {

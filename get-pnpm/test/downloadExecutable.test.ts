@@ -26,7 +26,7 @@ const KEYS: SigningKey[] = [{
 }]
 
 /** One thing broken per run, to drive each refusal separately. */
-type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'unsigned' | 'no-integrity' | 'no-executable' | 'npm-tarball-url' | 'truncated'
+type Mode = 'ok' | 'bad-tarball' | 'bad-signature' | 'unsigned' | 'root-signatures' | 'root-bad-signature' | 'no-integrity' | 'no-executable' | 'npm-tarball-url' | 'truncated'
 
 let tmpDir: string
 let server: http.Server
@@ -371,6 +371,28 @@ describe('downloadPnpmExecutable', () => {
     await assert.rejects(download(destIn('unsigned')), /carries no npm registry signature/)
   })
 
+  test('takes the signatures from the package document when the version document has none', async () => {
+    mode = 'root-signatures'
+    const destPath = destIn('root-signatures')
+
+    await download(destPath)
+
+    assert.equal(fs.readFileSync(destPath, 'utf8'), CONTENT)
+    assert.ok(requests.some(({ path }) => path === `/${packageNameFor()}`), 'the package document is requested')
+  })
+
+  test('refuses package-document signatures that do not cover the checksum served', async () => {
+    mode = 'root-bad-signature'
+
+    await assert.rejects(download(destIn('root-bad-signature')), /is not valid/)
+  })
+
+  test('does not request the package document when the version document is signed', async () => {
+    await download(destIn('version-signed'))
+
+    assert.ok(!requests.some(({ path }) => path === `/${packageNameFor()}`))
+  })
+
   test('takes an unsigned package when the caller waives the signature', async () => {
     mode = 'unsigned'
     const destPath = destIn('signature-waived')
@@ -474,15 +496,17 @@ function handleRegistryRequest (req: http.IncomingMessage, res: http.ServerRespo
     res.end(JSON.stringify(versionMetaFor(name)))
     return
   }
+  if (!url.includes('/-/')) {
+    const name = url.slice(1).replace(/^npm\//, '')
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(packumentFor(name)))
+    return
+  }
   serveTarball(res)
 }
 
 function versionMetaFor (name: string): unknown {
-  const integrity = `sha512-${createHash('sha512').update(bytesFor(mode)).digest('base64')}`
-  // Signing a checksum other than the one served is what a tampered
-  // checksum looks like: bytes and metadata agree, the signature does not
-  // cover them.
-  const signed = mode === 'bad-signature' ? `sha512-${'A'.repeat(86)}==` : integrity
+  const integrity = integrityOf(bytesFor(mode))
   return {
     dist: {
       // An npm URL is what a registry proxying npm hands back, and has to
@@ -491,14 +515,35 @@ function versionMetaFor (name: string): unknown {
         ? `https://registry.npmjs.org/${name}/-/tarball.tgz`
         : `${addressOf(cdn)}/${name}/-/tarball.tgz`,
       ...(mode === 'no-integrity' ? {} : { integrity }),
-      signatures: mode === 'unsigned'
-        ? []
-        : [{
-          keyid: KEYS[0]!.keyid,
-          sig: createSign('SHA256').update(`${name}@${VERSION}:${signed}`).sign(privateKey, 'base64'),
-        }],
+      // A proxy that strips the signatures here leaves them in the package document.
+      ...(mode === 'root-signatures' || mode === 'root-bad-signature' ? {} : { signatures: signaturesFor(name) }),
     },
   }
+}
+
+function packumentFor (name: string): unknown {
+  const signed = mode === 'root-signatures' || mode === 'root-bad-signature'
+  return {
+    'dist-tags': { latest: VERSION },
+    versions: { [VERSION]: { dist: signed ? { signatures: signaturesFor(name) } : {} } },
+  }
+}
+
+function signaturesFor (name: string): unknown[] {
+  if (mode === 'unsigned') return []
+  // Signing a checksum other than the one served is what a tampered checksum
+  // looks like: bytes and metadata agree, the signature does not cover them.
+  const signed = mode === 'bad-signature' || mode === 'root-bad-signature'
+    ? `sha512-${'A'.repeat(86)}==`
+    : integrityOf(bytesFor(mode))
+  return [{
+    keyid: KEYS[0]!.keyid,
+    sig: createSign('SHA256').update(`${name}@${VERSION}:${signed}`).sign(privateKey, 'base64'),
+  }]
+}
+
+function integrityOf (bytes: Buffer): string {
+  return `sha512-${createHash('sha512').update(bytes).digest('base64')}`
 }
 
 function relayProxyRequest (req: http.IncomingMessage, res: http.ServerResponse): void {

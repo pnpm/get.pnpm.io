@@ -4,7 +4,7 @@ import path from 'node:path'
 
 import { extractTarballMember } from './extractTarballMember.js'
 import { isMusl, platformPackageName } from './platformPackageName.js'
-import { downloadTarball, fetchVersionMeta, normalizeRegistry, type RequestHeaders, useCertificateAuthorities, useProxyFromEnv } from './registry.js'
+import { downloadTarball, fetchSignatures, fetchVersionMeta, normalizeRegistry, type RequestHeaders, useCertificateAuthorities, useProxyFromEnv } from './registry.js'
 import { majorVersion } from './resolveVersion.js'
 import { sameFileContents } from './sameFileContents.js'
 import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
@@ -91,7 +91,7 @@ async function fetchExecutable (
       name: packageName,
       version,
       integrity: meta.dist.integrity,
-      signatures: meta.dist.signatures,
+      signatures: await fetchSignatures(meta, { registry, pkgName: packageName, version, headers: opts.headers }),
       keys: opts.keys,
     })
   }
