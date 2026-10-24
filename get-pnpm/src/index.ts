@@ -6,7 +6,7 @@ import path from 'node:path'
 import { extractTarball } from './extractTarball.js'
 import { registryConfigFromEnv } from './npmConfig.js'
 import { isMusl, platformPackageName } from './platformPackageName.js'
-import { downloadTarball, fetchPackument, fetchVersionMeta, type RequestHeaders, useCertificateAuthorities, useProxyFromEnv } from './registry.js'
+import { downloadTarball, fetchPackument, fetchSignatures, fetchVersionMeta, type RequestHeaders, useCertificateAuthorities, useProxyFromEnv } from './registry.js'
 import { majorVersion, resolveVersion } from './resolveVersion.js'
 import { findShadowingPnpm, pnpmHomeDir, renderShadowingPnpmWarning } from './shadowingPnpm.js'
 import { renderUndoHint } from './undoHint.js'
@@ -308,7 +308,13 @@ function verifiedPackageFetcher (
       name: pkgName,
       version: opts.version,
       integrity: meta.dist.integrity,
-      signatures: meta.dist.signatures,
+      signatures: await fetchSignatures(meta, {
+        registry: opts.registry,
+        pkgName,
+        version: opts.version,
+        headers: opts.headers,
+        headersPath: opts.authPath,
+      }),
       keys: opts.keys,
     })
     // Unpack away from the directory being assembled: `pnpm` is both a package

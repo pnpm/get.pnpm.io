@@ -168,6 +168,34 @@ export async function fetchVersionMeta (
 }
 
 /**
+ * The registry signatures of `pkgName@version`.
+ *
+ * Some registry proxies, JFrog Artifactory among them, strip `dist.signatures`
+ * from the version document but keep them in the package document, so that is
+ * where they are looked up when `meta` carries none. Only the signatures are
+ * taken from it: they cover `<name>@<version>:<integrity>`, so they still have
+ * to verify against the checksum in `meta`, which the tarball is checked
+ * against.
+ */
+export async function fetchSignatures (
+  meta: VersionMeta,
+  opts: { registry: string, pkgName: string, version: string, headers?: RequestHeaders, headersPath?: string }
+): Promise<PackageSignature[] | undefined> {
+  if (meta.dist.signatures?.length) return meta.dist.signatures
+  // Escaped the way npm requests a scoped package, which every registry serves.
+  const packument = await fetchJson<SignedPackument>(
+    new URL(opts.pkgName.replaceAll('/', '%2f'), opts.registry),
+    ABBREVIATED_PACKUMENT,
+    { registry: opts.registry, headers: opts.headers, headersPath: opts.headersPath }
+  )
+  return packument.versions?.[opts.version]?.dist?.signatures
+}
+
+interface SignedPackument {
+  versions?: Record<string, { dist?: { signatures?: PackageSignature[] } } | undefined>
+}
+
+/**
  * Streams `meta.dist.tarball` to `dest`, verifying the checksum the registry
  * published for it. A mismatch removes nothing — the caller discards the whole
  * temporary directory.

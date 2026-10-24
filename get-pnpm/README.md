@@ -77,6 +77,11 @@ and its checksum, so a checksum taken from it proves nothing on its own; npm als
 signs `<name>@<version>:<integrity>` with a key that this package pins, and a
 download that fails either check is refused rather than installed.
 
+A registry proxy that strips the signatures from the version document but keeps
+them in the package document (JFrog Artifactory does) is handled: the signatures
+are read from there instead, and still have to cover the checksum the download
+is checked against.
+
 The download goes to the registry npm is configured with (`npm_config_registry`), not to GitHub — including the tarball itself, so a registry that proxies npm and hands back an npmjs.org URL does not send the download off the mirror.
 
 ### Private registries
