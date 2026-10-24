@@ -14,12 +14,13 @@ This is a permanent install that edits your shell configuration (see
 [What it changes](#what-it-changes)). To run pnpm once in someone else's
 project, `npx pnpm install` needs neither.
 
-Install a specific version, major, or dist-tag:
+Install a specific version, major, range, or dist-tag:
 
 ```sh
 npx get-pnpm 12         # the latest release of pnpm 12
 npx get-pnpm next-12    # the pnpm 12 prerelease lane
 npx get-pnpm 11.20.0    # an exact version
+npx get-pnpm "^12.1.0"  # the version npm would install for a range
 ```
 
 Then open a new terminal, or source the file the installer names in its output.

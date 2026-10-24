@@ -32,8 +32,29 @@ describe('resolveVersion', () => {
     assert.equal(resolveVersion(packument, '12'), '12.0.0-rc.1')
   })
 
+  test('resolves a range to the highest version in it', () => {
+    assert.equal(resolveVersion(packument, '^10.0.0'), '10.34.5')
+    assert.equal(resolveVersion(packument, '~11.19.0'), '11.19.0')
+    assert.equal(resolveVersion(packument, '>=10 <11.20'), '11.19.0')
+    assert.equal(resolveVersion(packument, '10.x || 11.x'), '11.20.0')
+  })
+
+  test('resolves a range to latest when latest is in it', () => {
+    const backported = { ...packument, versions: { ...packument.versions, '11.21.0': {} } }
+    assert.equal(resolveVersion(backported, '^11.0.0'), '11.20.0')
+    assert.equal(resolveVersion(backported, '^11.20.1'), '11.21.0')
+  })
+
+  test('resolves a range to a prerelease only when the range names one', () => {
+    assert.equal(resolveVersion(packument, '>=11'), '11.20.0')
+    assert.equal(resolveVersion(packument, '^12.0.0-0'), '12.0.0-rc.1')
+    assert.throws(() => resolveVersion(packument, '^12.0.0'), /could not be found/)
+  })
+
   test('lists the available tags when nothing matches', () => {
     assert.throws(() => resolveVersion(packument, '9'), /could not be found.*latest, latest-10, next-12/s)
+    assert.throws(() => resolveVersion(packument, '^9.0.0'), /could not be found/)
+    assert.throws(() => resolveVersion(packument, 'not-a-tag'), /could not be found/)
   })
 })
 
