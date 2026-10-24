@@ -182,29 +182,32 @@ export async function downloadTarball (meta: VersionMeta, dest: string, opts: Ta
   // The whole download is retried, not just the request: a connection reset
   // halfway through a ~150 MB body is the likeliest blip of all. Each attempt
   // rewrites `dest` from the start.
-  const actual = await withRetries(async () => {
-    const stall = stallWatchdog(opts.stallTimeoutMs ?? TARBALL_STALL_TIMEOUT_MS)
-    try {
-      const response = await request(url, undefined, TARBALL_TIMEOUT_MS, opts, stall.signal)
-      const hash = createHash(algorithm)
-      const body = readBody(response, url, TARBALL_TIMEOUT_MS)
-      await pipeline(
-        async function * () {
-          for await (const chunk of body) {
-            stall.reset()
-            hash.update(chunk)
-            yield chunk
-          }
-        },
-        createWriteStream(dest)
-      )
-      return hash.digest('base64')
-    } finally {
-      stall.clear()
-    }
-  })
+  const actual = await withRetries(() => downloadAttempt(url, dest, algorithm, opts))
   if (actual !== expected) {
     throw new Error(`The download from ${url.href} does not match the checksum the npm registry published for it. Refusing to install.`)
+  }
+}
+
+/** One attempt of `downloadTarball`. @returns the digest of what was written. */
+async function downloadAttempt (url: URL, dest: string, algorithm: string, opts: TarballOptions): Promise<string> {
+  const stall = stallWatchdog(opts.stallTimeoutMs ?? TARBALL_STALL_TIMEOUT_MS)
+  try {
+    const response = await request(url, undefined, TARBALL_TIMEOUT_MS, opts, stall.signal)
+    const hash = createHash(algorithm)
+    await pipeline(
+      readBody(response, url, TARBALL_TIMEOUT_MS),
+      async function * (body: AsyncIterable<Uint8Array>) {
+        for await (const chunk of body) {
+          stall.reset()
+          hash.update(chunk)
+          yield chunk
+        }
+      },
+      createWriteStream(dest)
+    )
+    return hash.digest('base64')
+  } finally {
+    stall.clear()
   }
 }
 
@@ -267,14 +270,14 @@ function checksum (meta: VersionMeta): [algorithm: string, expected: string] {
   return [entry.slice(0, separator), entry.slice(separator + 1)]
 }
 
-async function fetchJson<T> (url: URL, accept: string, opts: ScopedHeadersOptions = {}): Promise<T> {
+async function fetchJson<Result> (url: URL, accept: string, opts: ScopedHeadersOptions = {}): Promise<Result> {
   return withRetries(async () => {
     const response = await request(url, accept, METADATA_TIMEOUT_MS, opts)
     const chunks: Uint8Array[] = []
     for await (const chunk of readBody(response, url, METADATA_TIMEOUT_MS)) chunks.push(chunk)
     // Malformed JSON is what the server sent, and would be sent again, so a
     // parse failure is not retried.
-    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T
+    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as Result
   })
 }
 
@@ -288,12 +291,14 @@ class RequestFailure extends Error {
   }
 }
 
-async function withRetries<T> (attempt: () => Promise<T>): Promise<T> {
+async function withRetries<Result> (attempt: () => Promise<Result>): Promise<Result> {
   for (let attemptNo = 1; ; attemptNo++) {
     try {
+      // eslint-disable-next-line no-await-in-loop -- each attempt waits for the previous one to fail
       return await attempt()
     } catch (err) {
       if (attemptNo >= MAX_ATTEMPTS || !(err instanceof RequestFailure) || !err.retryable) throw err
+      // eslint-disable-next-line no-await-in-loop -- the delay is what spaces the attempts out
       await delay(RETRY_DELAY_MS * attemptNo)
     }
   }
@@ -319,33 +324,46 @@ async function request (
   let currentUrl = url
 
   for (let redirects = 0; ; redirects++) {
-    let response: Response
-    try {
-      response = await fetch(currentUrl, {
-        redirect: 'manual',
-        signal,
-        headers: { ...headersFor(currentUrl, opts), ...(accept ? { accept } : {}) },
-      })
-    } catch (err) {
-      throw new RequestFailure(`Could not reach ${currentUrl.href}: ${reasonFor(err, timeoutMs)}`, { cause: err, retryable: isRetryableError(err, timeoutMs) })
-    }
-
+    // eslint-disable-next-line no-await-in-loop -- each hop is known only once the previous one answers
+    const response = await fetchHop(currentUrl, { accept, signal, timeoutMs, opts })
     if (!REDIRECT_STATUSES.has(response.status) && response.ok) return response
 
     // Left unread, the body would hold the connection until it is collected.
+    // eslint-disable-next-line no-await-in-loop -- the connection is released before the next hop opens one
     await response.body?.cancel().catch(() => {})
-    if (!REDIRECT_STATUSES.has(response.status)) {
-      throw new RequestFailure(`Could not download ${currentUrl.href}: ${response.status} ${response.statusText}`, { retryable: isRetryableStatus(response.status) })
-    }
-    const location = response.headers.get('location')
-    if (location == null) {
-      throw new RequestFailure(`Could not download ${currentUrl.href}: ${response.status} redirect without a Location header`, { retryable: false })
-    }
+    const target = redirectTarget(response, currentUrl)
     if (redirects >= MAX_REDIRECTS) {
       throw new RequestFailure(`Could not download ${url.href}: too many redirects`, { retryable: false })
     }
-    currentUrl = new URL(location, currentUrl)
+    currentUrl = target
   }
+}
+
+async function fetchHop (
+  url: URL,
+  { accept, signal, timeoutMs, opts }: { accept: string | undefined, signal: AbortSignal, timeoutMs: number, opts: ScopedHeadersOptions }
+): Promise<Response> {
+  try {
+    return await fetch(url, {
+      redirect: 'manual',
+      signal,
+      headers: { ...headersFor(url, opts), ...(accept ? { accept } : {}) },
+    })
+  } catch (err) {
+    throw new RequestFailure(`Could not reach ${url.href}: ${reasonFor(err, timeoutMs)}`, { cause: err, retryable: isRetryableError(err, timeoutMs) })
+  }
+}
+
+/** Where the redirect `response` points; throws for a response that is not one. */
+function redirectTarget (response: Response, url: URL): URL {
+  if (!REDIRECT_STATUSES.has(response.status)) {
+    throw new RequestFailure(`Could not download ${url.href}: ${response.status} ${response.statusText}`, { retryable: isRetryableStatus(response.status) })
+  }
+  const location = response.headers.get('location')
+  if (location == null) {
+    throw new RequestFailure(`Could not download ${url.href}: ${response.status} redirect without a Location header`, { retryable: false })
+  }
+  return new URL(location, url)
 }
 
 /**
@@ -379,7 +397,9 @@ async function * readBody (response: Response, url: URL, timeoutMs: number): Asy
 function stallWatchdog (timeoutMs: number): { signal: AbortSignal, reset: () => void, clear: () => void } {
   const controller = new AbortController()
   let timer: NodeJS.Timeout | undefined
-  const clear = (): void => { clearTimeout(timer) }
+  const clear = (): void => {
+    clearTimeout(timer)
+  }
   const reset = (): void => {
     clear()
     timer = setTimeout(() => {
@@ -421,5 +441,7 @@ function isRetryableStatus (status: number): boolean {
 }
 
 async function delay (ms: number): Promise<void> {
-  await new Promise<void>((resolve) => { setTimeout(resolve, ms) })
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms)
+  })
 }

@@ -38,6 +38,17 @@ export function platformPackageName ({ major, platform, arch, musl }: Target): s
 
   npx get-pnpm 12`)
   }
+  assertBinaryIsPublished({ major, platform, arch })
+  const linuxMusl = platform === 'linux' && musl
+  if (major >= 12) {
+    return `@pnpm/exe.${platform}-${arch}${linuxMusl ? '-musl' : ''}`
+  }
+  return `@pnpm/${legacyOsSegment(platform, linuxMusl)}-${arch}`
+}
+
+/** Throws for the hosts outside v12's own targets that a release leaves out. */
+function assertBinaryIsPublished ({ major, platform, arch }: Omit<Target, 'musl'>): void {
+  const target = `${platform}-${arch}`
   if ((arch !== 'x64' && arch !== 'arm64') ||
     (platform !== 'darwin' && platform !== 'linux' && platform !== 'win32')) {
     throw new Error(`Sorry! pnpm does not provide a pre-built binary for ${target}.`)
@@ -52,11 +63,6 @@ Install pnpm a different way instead:
 
 More context: https://github.com/pnpm/pnpm/issues/11423`)
   }
-  const linuxMusl = platform === 'linux' && musl
-  if (major >= 12) {
-    return `@pnpm/exe.${platform}-${arch}${linuxMusl ? '-musl' : ''}`
-  }
-  return `@pnpm/${legacyOsSegment(platform, linuxMusl)}-${arch}`
 }
 
 function legacyOsSegment (platform: string, isMusl: boolean): string {

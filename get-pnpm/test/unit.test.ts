@@ -1,5 +1,5 @@
-import { createSign, generateKeyPairSync } from 'node:crypto'
 import assert from 'node:assert/strict'
+import { createSign, generateKeyPairSync } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -69,7 +69,7 @@ describe('platformPackageName', () => {
 
   test('those hosts have no binary before v12, and are pointed at it', () => {
     assert.throws(() => platformPackageName(target({ platform: 'freebsd' })), /pnpm v11 does not.*npx get-pnpm 12/s)
-    assert.throws(() => platformPackageName(target({ arch: 's390x' })), /npx get-pnpm 12/s)
+    assert.throws(() => platformPackageName(target({ arch: 's390x' })), /npx get-pnpm 12/)
   })
 
   test('a musl suffix is never added to them', () => {
@@ -88,7 +88,7 @@ describe('platformPackageName', () => {
   })
 
   test('points Intel macOS users away from v11, which has no working binary', () => {
-    assert.throws(() => platformPackageName(target({ platform: 'darwin', arch: 'x64' })), /Intel macOS/s)
+    assert.throws(() => platformPackageName(target({ platform: 'darwin', arch: 'x64' })), /Intel macOS/)
     assert.equal(platformPackageName(target({ major: 10, platform: 'darwin', arch: 'x64' })), '@pnpm/macos-x64')
   })
 })
@@ -169,8 +169,12 @@ describe('verifyRegistrySignature', () => {
 describe('sameFileContents', () => {
   let dir: string
 
-  before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'get-pnpm-same-')) })
-  after(() => { fs.rmSync(dir, { recursive: true, force: true }) })
+  before(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'get-pnpm-same-'))
+  })
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
 
   const write = (name: string, content: string | Buffer): string => {
     const file = path.join(dir, name)

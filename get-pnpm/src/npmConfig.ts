@@ -62,10 +62,10 @@ function tokenAuth (registry: string, sources: ConfigSource[]): RegistryConfig {
   return token == null
     ? { registry }
     : {
-        registry,
-        authPath: token.pathname,
-        headers: { authorization: `Bearer ${token.token}` },
-      }
+      registry,
+      authPath: token.pathname,
+      headers: { authorization: `Bearer ${token.token}` },
+    }
 }
 
 function registryAndEmbeddedAuth (rawRegistry: string): RegistryConfig {
@@ -102,50 +102,52 @@ function envSource (env: NodeJS.ProcessEnv, cwd: string): ConfigSource {
 
 function readNpmrc (npmrc: NpmrcCandidate, env: NodeJS.ProcessEnv): ConfigSource {
   const dir = path.dirname(npmrc.path)
-  let text: string
-  try {
-    text = fs.readFileSync(npmrc.path, 'utf8')
-  } catch (err) {
-    if (isErrno(err, 'ENOENT')) return { dir, entries: [] }
-    if (npmrc.ignoreUnreadable && isUnreadableNpmrcError(err)) return { dir, entries: [] }
-    throw err
-  }
+  const text = readNpmrcText(npmrc)
+  if (text == null) return { dir, entries: [] }
 
   const entries: Array<[string, string]> = []
   for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim()
-    if (!line || line.startsWith('#') || line.startsWith(';')) continue
-    const separator = line.indexOf('=')
-    if (separator === -1) continue
-    const key = line.slice(0, separator).trim()
-    const rawValue = stripQuotes(line.slice(separator + 1).trim())
-    const value = expandEnv(rawValue, env)
-    if (value != null) entries.push([key, value])
+    const entry = parseNpmrcLine(rawLine.trim(), env)
+    if (entry != null) entries.push(entry)
   }
   return { dir, entries }
 }
 
+/** The text of `npmrc`, or `undefined` when there is none to read. */
+function readNpmrcText (npmrc: NpmrcCandidate): string | undefined {
+  try {
+    return fs.readFileSync(npmrc.path, 'utf8')
+  } catch (err) {
+    if (isErrno(err, 'ENOENT')) return undefined
+    if (npmrc.ignoreUnreadable && isUnreadableNpmrcError(err)) return undefined
+    throw err
+  }
+}
+
+function parseNpmrcLine (line: string, env: NodeJS.ProcessEnv): [string, string] | undefined {
+  if (!line || line.startsWith('#') || line.startsWith(';')) return undefined
+  const separator = line.indexOf('=')
+  if (separator === -1) return undefined
+  const key = line.slice(0, separator).trim()
+  const value = expandEnv(stripQuotes(line.slice(separator + 1).trim()), env)
+  return value == null ? undefined : [key, value]
+}
+
 function tokenForRegistry (registry: string, entries: Array<[string, string]>): RegistryToken | undefined {
   const registryUrl = new URL(registry)
-  let best: { pathname: string, position: number, token: string } | undefined
+  let best: RegistryToken | undefined
 
-  entries.forEach(([key, token], position) => {
-    if (token === '') return
+  for (const [key, token] of entries) {
+    if (token === '') continue
     const scope = authTokenScope(key, registryUrl.protocol)
-    if (scope == null) return
-    if (scope.host !== registryUrl.host.toLowerCase()) return
-    if (!registryUrl.pathname.startsWith(scope.pathname)) return
-
-    if (
-      best == null ||
-      scope.pathname.length > best.pathname.length ||
-      (scope.pathname.length === best.pathname.length && position > best.position)
-    ) {
-      best = { pathname: scope.pathname, position, token }
+    if (scope == null || !scopeCovers(scope, registryUrl)) continue
+    // A longer prefix wins; at equal length, the later entry does.
+    if (best == null || scope.pathname.length >= best.pathname.length) {
+      best = { pathname: scope.pathname, token }
     }
-  })
+  }
 
-  return best == null ? undefined : { pathname: best.pathname, token: best.token }
+  return best
 }
 
 function mostSpecificToken (candidates: Array<RegistryToken | undefined>): RegistryToken | undefined {
@@ -190,18 +192,26 @@ interface CaSetting {
 function scopedCaSettings (registry: string, sources: ConfigSource[]): CaSetting[] {
   const registryUrl = new URL(registry)
   const scoped = sources.flatMap((source, sourceIndex) => source.entries.flatMap(([key, value]) => {
-    if (value === '') return []
-    for (const setting of CA_SETTINGS) {
-      const scope = registryScope(key, `:${setting}`, registryUrl.protocol)
-      if (scope == null) continue
-      if (scope.host !== registryUrl.host.toLowerCase() || !registryUrl.pathname.startsWith(scope.pathname)) return []
-      return [{ sourceIndex, pathname: scope.pathname, dir: source.dir, setting, value }]
-    }
-    return []
+    const scope = value === '' ? undefined : caSettingScope(key, registryUrl)
+    return scope == null ? [] : [{ sourceIndex, dir: source.dir, value, ...scope }]
   }))
   const longest = Math.max(...scoped.map(({ pathname }) => pathname.length))
   const winner = scoped.find(({ pathname }) => pathname.length === longest)
   return scoped.filter(({ sourceIndex, pathname }) => sourceIndex === winner?.sourceIndex && pathname.length === longest)
+}
+
+/** The CA setting `key` scopes to a prefix of `registryUrl`, if it is one. */
+function caSettingScope (key: string, registryUrl: URL): { pathname: string, setting: string } | undefined {
+  for (const setting of CA_SETTINGS) {
+    const scope = registryScope(key, `:${setting}`, registryUrl.protocol)
+    if (scope == null) continue
+    return scopeCovers(scope, registryUrl) ? { pathname: scope.pathname, setting } : undefined
+  }
+  return undefined
+}
+
+function scopeCovers (scope: { host: string, pathname: string }, registryUrl: URL): boolean {
+  return scope.host === registryUrl.host.toLowerCase() && registryUrl.pathname.startsWith(scope.pathname)
 }
 
 function readCaFile (file: string): string {

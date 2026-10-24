@@ -37,27 +37,36 @@ export async function extractTarballMember (
     createGunzip(),
     async function (source: AsyncIterable<Buffer>): Promise<void> {
       const reader = new BlockReader(source)
-      while (true) {
-        const header = await reader.read(BLOCK_SIZE)
-        // The archive ends with zero-filled blocks; one is enough to stop.
-        if (header == null || header[0] === 0) return
-        const entry = parseHeader(header)
-        if (FILE_TYPES.has(entry.type) && entry.path === memberPath) {
-          const written = await reader.pipe(entry.size, createWriteStream(dest, { flags: 'wx', mode }))
-          if (written !== entry.size) {
-            throw new Error(`${tarball} ends after ${written} of the ${entry.size} bytes it declares for ${memberPath}.`)
-          }
-          found = true
-          // The rest of the archive holds nothing this caller asked for, and
-          // the checksum that vouches for it was checked before any of it was
-          // read.
-          return
-        }
-        await reader.skip(Math.ceil(entry.size / BLOCK_SIZE) * BLOCK_SIZE)
+      const entry = await seekMember(reader, memberPath)
+      if (entry == null) return
+      const written = await reader.pipe(entry.size, createWriteStream(dest, { flags: 'wx', mode }))
+      if (written !== entry.size) {
+        throw new Error(`${tarball} ends after ${written} of the ${entry.size} bytes it declares for ${memberPath}.`)
       }
+      found = true
+      // The rest of the archive holds nothing this caller asked for, and the
+      // checksum that vouches for it was checked before any of it was read.
     }
   )
   return found
+}
+
+/**
+ * Reads up to the content of the regular file at `memberPath`.
+ *
+ * @returns its header, or `null` when the archive has no such file.
+ */
+async function seekMember (reader: BlockReader, memberPath: string): Promise<TarEntry | null> {
+  while (true) {
+    // eslint-disable-next-line no-await-in-loop -- a tar archive can only be walked one entry after another
+    const header = await reader.read(BLOCK_SIZE)
+    // The archive ends with zero-filled blocks; one is enough to stop.
+    if (header == null || header[0] === 0) return null
+    const entry = parseHeader(header)
+    if (FILE_TYPES.has(entry.type) && entry.path === memberPath) return entry
+    // eslint-disable-next-line no-await-in-loop -- a tar archive can only be walked one entry after another
+    await reader.skip(Math.ceil(entry.size / BLOCK_SIZE) * BLOCK_SIZE)
+  }
 }
 
 interface TarEntry {
@@ -99,10 +108,8 @@ class BlockReader {
   }
 
   async skip (size: number): Promise<void> {
-    let left = size
-    while (left > 0) {
-      if (!await this.#fill(1)) return
-      left -= this.#take(Math.min(left, this.#buffedBytes)).length
+    for await (const _chunk of this.#chunks({ left: size })) {
+      // Discarded.
     }
   }
 
@@ -113,25 +120,26 @@ class BlockReader {
    * the stream ended early.
    */
   async pipe (size: number, destination: NodeJS.WritableStream): Promise<number> {
-    const self = this
-    let left = size
-    await pipeline(
-      async function * (): AsyncGenerator<Buffer> {
-        while (left > 0) {
-          if (!await self.#fill(1)) return
-          const chunk = self.#take(Math.min(left, self.#buffedBytes))
-          left -= chunk.length
-          yield chunk
-        }
-      },
-      destination
-    )
-    return size - left
+    const progress = { left: size }
+    await pipeline(this.#chunks(progress), destination)
+    return size - progress.left
+  }
+
+  /** The next `progress.left` bytes, counting them down as they are yielded. */
+  async * #chunks (progress: { left: number }): AsyncGenerator<Buffer> {
+    while (progress.left > 0) {
+      // eslint-disable-next-line no-await-in-loop -- the stream is read in order, one chunk at a time
+      if (!await this.#fill(1)) return
+      const chunk = this.#take(Math.min(progress.left, this.#buffedBytes))
+      progress.left -= chunk.length
+      yield chunk
+    }
   }
 
   /** Reads until at least `size` bytes are buffered, or the stream ends. */
   async #fill (size: number): Promise<boolean> {
     while (this.#buffedBytes < size && !this.#done) {
+      // eslint-disable-next-line no-await-in-loop -- the stream is read in order, one chunk at a time
       const { value, done } = await this.#iterator.next()
       if (done === true) {
         this.#done = true
