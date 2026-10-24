@@ -74,7 +74,14 @@ download_once() {
   else
     # wget has no portable way to report the status, so every failure is
     # retried. `-T` is the one timeout busybox's wget understands too.
-    wget -q -T 30 -O "$2" "$1" || return 1
+    if wget --version > /dev/null 2>&1; then
+      # GNU wget retries up to 20 times on its own, which would multiply with
+      # the attempts made here. busybox's wget has no --version, and does not
+      # retry.
+      wget -q -T 30 --tries=1 -O "$2" "$1" || return 1
+    else
+      wget -q -T 30 -O "$2" "$1" || return 1
+    fi
   fi
 }
 
