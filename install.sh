@@ -23,11 +23,58 @@ ohai() {
 
 # End from https://github.com/Homebrew/install/blob/master/install.sh
 
+# A reset connection or a 502 from a load balancer in front of the registry is
+# transient, and should not fail the whole install, least of all in CI. The
+# `get-pnpm` package retries the same failures the same way.
+DOWNLOAD_ATTEMPTS=3
+
+# Write the body at <url> to stdout, retrying a transient failure.
+#
+# Each attempt downloads to a file of its own rather than straight to stdout:
+# stdout cannot be rewound, so a connection lost partway through would leave
+# half a body for the next attempt to append to.
 download() {
+  local file attempt status
+  file="$(mktemp)" || return 1
+  attempt=1
+  while :; do
+    download_once "$1" "$file"
+    status=$?
+    [ "$status" -eq 0 ] && break
+    if [ "$status" -eq 2 ] || [ "$attempt" -ge "$DOWNLOAD_ATTEMPTS" ]; then
+      rm -f "$file"
+      return 1
+    fi
+    printf 'Retrying %s\n' "$1" >&2
+    sleep "$attempt"
+    attempt=$((attempt + 1))
+  done
+  cat "$file"
+  status=$?
+  rm -f "$file"
+  return "$status"
+}
+
+# Download <url> to <file>. Returns 2 for a failure that retrying cannot help
+# with: a 4xx means the request itself is wrong (a missing package, a bad
+# version), except for a request timeout and rate limiting, which say "not now"
+# rather than "no".
+#
+# A connection that goes 30 seconds without sending anything is abandoned, so
+# that a registry that stalled is retried instead of hanging the install.
+download_once() {
+  local code
   if command -v curl > /dev/null 2>&1; then
-    curl -fsSL "$1"
+    code="$(curl -fsSL --speed-limit 1 --speed-time 30 -w '%{http_code}' -o "$2" "$1")" && return 0
+    case "$code" in
+      408 | 429 | 5??) return 1 ;;
+      4??) return 2 ;;
+      *) return 1 ;;
+    esac
   else
-    wget -qO- "$1"
+    # wget has no portable way to report the status, so every failure is
+    # retried. `-T` is the one timeout busybox's wget understands too.
+    wget -q -T 30 -O "$2" "$1" || return 1
   fi
 }
 

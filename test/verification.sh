@@ -1,6 +1,7 @@
 #!/bin/sh
 # Drives every way the v12 verification can fail, and asserts the installer
-# refuses and installs nothing.
+# refuses and installs nothing. Then drives a flaky registry, and asserts the
+# installer retries its way to an install.
 #
 # The installer talks to a fixed registry, so each case runs against a copy with
 # that one URL repointed at the mock. Everything else is the shipped script.
@@ -20,16 +21,19 @@ echo "testing $script against pnpm $version"
 
 failures=0
 
-expect_refusal() {
+# Runs the installer against the mock in <mode> on <port>, leaving its output
+# in $output, its exit code in $code, and its PNPM_HOME under $home.
+run_installer() {
   mode="$1"
-  expected="$2"
-  port="$3"
+  port="$2"
 
   node "$here/mock-registry.mjs" "$mode" "$port" "$version" > "$work/server.log" 2>&1 &
   server_pid=$!
   # Wait for the port rather than sleeping a guessed amount.
   i=0
-  while ! curl -fsS "http://127.0.0.1:$port/pnpm/$version" > /dev/null 2>&1; do
+  # Any answer will do: a request for a real path would use up the failure the
+  # flaky mode saves for the installer.
+  while ! curl -sS -o /dev/null "http://127.0.0.1:$port/" > /dev/null 2>&1; do
     i=$((i + 1))
     [ "$i" -lt 50 ] || { echo "mock registry did not start"; cat "$work/server.log"; exit 1; }
     sleep 0.2
@@ -62,6 +66,12 @@ expect_refusal() {
 
   kill "$server_pid" 2>/dev/null || true
   wait "$server_pid" 2>/dev/null || true
+}
+
+expect_refusal() {
+  mode="$1"
+  expected="$2"
+  run_installer "$mode" "$3"
 
   # PowerShell wraps its error text to the host width and prefixes the
   # continuation with a `|` gutter, so a phrase arrives as "is not | valid".
@@ -83,11 +93,28 @@ expect_refusal() {
   fi
 }
 
+expect_install() {
+  mode="$1"
+  run_installer "$mode" "$2"
+
+  if [ "$code" -ne 0 ]; then
+    echo "FAIL [$mode] the installer exited $code:"
+    printf '%s\n' "$output" | sed 's/^/      /'
+    failures=$((failures + 1))
+  elif ! [ -e "$home/pnpm/bin/pnpm" ] && ! [ -e "$home/pnpm/bin/pnpm.exe" ]; then
+    echo "FAIL [$mode] the installer exited 0, yet pnpm was not installed"
+    failures=$((failures + 1))
+  else
+    echo "ok   [$mode] installed"
+  fi
+}
+
 expect_refusal bad-tarball 'does not match the checksum' 8971
 expect_refusal bad-integrity 'is not valid' 8972
 expect_refusal no-signature 'carries no npm registry signature' 8973
 expect_refusal wrong-keyid 'unexpected npm key' 8974
 expect_refusal no-integrity 'published no checksum' 8975
+expect_install flaky 8976
 
 [ "$failures" -eq 0 ] || { echo "$failures case(s) failed"; exit 1; }
-echo "all verification failures are refused"
+echo "all verification failures are refused, and transient ones are retried"
