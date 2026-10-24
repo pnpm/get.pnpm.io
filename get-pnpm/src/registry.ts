@@ -184,7 +184,7 @@ export async function fetchSignatures (
   if (meta.dist.signatures?.length) return meta.dist.signatures
   // Escaped the way npm requests a scoped package, which every registry serves.
   const packument = await fetchJson<SignedPackument>(
-    new URL(opts.pkgName.replace('/', '%2f'), opts.registry),
+    new URL(opts.pkgName.replaceAll('/', '%2f'), opts.registry),
     ABBREVIATED_PACKUMENT,
     { registry: opts.registry, headers: opts.headers, headersPath: opts.headersPath }
   )
