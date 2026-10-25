@@ -8,7 +8,8 @@ import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import tls from 'node:tls'
 
-import { downloadPnpmExecutable, platformPackageName } from '../lib/index.js'
+import { downloadPnpmExecutable } from '../lib/index.js'
+import { platformPackageName } from '../lib/platformPackageName.js'
 import { useCertificateAuthorities } from '../lib/registry.js'
 
 const VERSION = '99.0.0'
