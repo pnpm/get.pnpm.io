@@ -50,7 +50,7 @@ export function pnpmRegistryConfig (opts: PnpmRegistryConfigOptions): PnpmRegist
     ...(opts.readProjectNpmrc ? [readNpmrc(path.join(projectDir(cwd), '.npmrc'), projectEntry)] : []),
     readNpmrc(userNpmrcPath(env, opts.homeDir), (key, value) => [expandEnv(key, env), expandEnv(value, env)]),
   ]
-  const settings = new Map(sources.toReversed().flatMap(({ entries }) => entries))
+  const settings = new Map([...sources].reverse().flatMap(({ entries }) => entries))
   const registry = normalizeRegistry(
     settings.get('@pnpm:registry') || settingFromEnv(env, 'registry') || settings.get('registry') || DEFAULT_REGISTRY
   )
