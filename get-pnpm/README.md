@@ -181,6 +181,22 @@ await downloadPnpmExecutable({
 })
 ```
 
+A program that Corepack runs, as the `pnpm` package's launcher is, takes all
+of its options from `corepackDownloadOptions`. It adds Corepack's settings to
+`pnpmRegistryConfig`: `COREPACK_NPM_REGISTRY` and its credentials, and
+`COREPACK_INTEGRITY_KEYS`. It reads the project `.npmrc` only while the
+signature is checked, and throws when `COREPACK_ENABLE_NETWORK` is `0`.
+
+```js
+import { corepackDownloadOptions, downloadPnpmExecutable } from 'get-pnpm'
+
+await downloadPnpmExecutable({
+  version: '12.0.0',
+  destPath: '/opt/pnpm/pnpm',
+  ...corepackDownloadOptions(),
+})
+```
+
 It verifies exactly what the other two do, and reads the archive in-process
 rather than shelling out to `tar`, so it works where no `tar` is on the PATH.
 Placement is atomic and tolerates losing a race with a concurrent call.

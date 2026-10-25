@@ -13,6 +13,7 @@ import { findShadowingPnpm, pnpmHomeDir, renderShadowingPnpmWarning } from './sh
 import { renderUndoHint } from './undoHint.js'
 import { type SigningKey, verifyRegistrySignature } from './verifySignature.js'
 
+export { type CorepackDownloadOptions, corepackDownloadOptions } from './corepack.js'
 export { type DownloadExecutableOptions, downloadPnpmExecutable } from './downloadExecutable.js'
 export { extractTarballMember } from './extractTarballMember.js'
 export { isMusl, platformPackageName, type Target } from './platformPackageName.js'
