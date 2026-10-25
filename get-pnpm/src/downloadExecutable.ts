@@ -17,8 +17,8 @@ function executableName (): string {
 export interface DownloadExecutableOptions {
   /** Exact version to download; nothing is resolved against dist-tags. */
   version: string
-  /** Registry to download from, e.g. from {@link registryFromEnv}; a subpath
-   * one keeps its subpath whether or not it ends in a slash. */
+  /** Registry to download from, e.g. from `corepackDownloadOptions`; a
+   * subpath one keeps its subpath whether or not it ends in a slash. */
   registry: string
   /** Path to place the executable at. */
   destPath: string

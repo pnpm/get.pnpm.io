@@ -129,10 +129,9 @@ These CAs are trusted in addition to the ones Node.js trusts. Node.js 22.19 or 2
 
 ## Using it from a program
 
-`installPnpm` does what the command does: download, verify, then hand over to
-`pnpm setup`, which installs globally and edits your `PATH`. A caller that
-manages its own directory — a CI action, say — wants `downloadPnpm` instead,
-which verifies and places the executable and nothing else:
+A caller that manages its own directory — a CI action, say — wants
+`downloadPnpm`, which verifies and places the executable and nothing else. It
+does not run `pnpm setup` or edit your `PATH`:
 
 ```js
 import { downloadPnpm } from 'get-pnpm'
@@ -164,24 +163,25 @@ await downloadPnpmExecutable({
 })
 ```
 
-The registry options of all three can come from `pnpmRegistryConfig`. It reads
-the registry, credentials, and CA certificates from the `.npmrc` files the way
-pnpm reads them for its own packages, `@pnpm:registry` included. The project
-`.npmrc` is read only when you pass `readProjectNpmrc: true`. Pass it only when
-the download's signature is checked, because a repository that picks the
-registry of an unchecked download picks the executable too.
+A program that Corepack runs, as the `pnpm` package's launcher is, takes all
+of its options from `corepackDownloadOptions`. It reads the registry,
+credentials, and CA certificates from `.npmrc` the way pnpm reads them for its
+own packages, then applies Corepack's settings: `COREPACK_NPM_REGISTRY` and its
+credentials, and `COREPACK_INTEGRITY_KEYS`. It reads the project `.npmrc` only
+while the signature is checked, and throws when `COREPACK_ENABLE_NETWORK` is
+`0`.
 
 ```js
-import { downloadPnpmExecutable, pnpmRegistryConfig } from 'get-pnpm'
+import { corepackDownloadOptions, downloadPnpmExecutable } from 'get-pnpm'
 
 await downloadPnpmExecutable({
   version: '12.0.0',
   destPath: '/opt/pnpm/pnpm',
-  ...pnpmRegistryConfig({ readProjectNpmrc: true }),
+  ...corepackDownloadOptions(),
 })
 ```
 
-It verifies exactly what the other two do, and reads the archive in-process
+It verifies exactly what `downloadPnpm` does, and reads the archive in-process
 rather than shelling out to `tar`, so it works where no `tar` is on the PATH.
 Placement is atomic and tolerates losing a race with a concurrent call.
 
