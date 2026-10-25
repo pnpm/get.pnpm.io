@@ -39,9 +39,10 @@ Arguments:
                      directory pins, then "latest".
 
                      The project's pin is read from devEngines.packageManager
-                     or packageManager in its package.json (the workspace
-                     root's, in a workspace). A range resolves to the version
-                     pnpm-lock.yaml records while that is still in range.
+                     or packageManager in its manifest, or the workspace
+                     root's for a workspace project, the way pnpm reads it. A
+                     range resolves to the version pnpm-lock.yaml records
+                     while that is still in range.
 
 Environment variables:
   PNPM_VERSION           Version to install when no argument is given.

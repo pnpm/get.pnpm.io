@@ -26,8 +26,8 @@ npx get-pnpm "^12.1.0"  # the version npm would install for a range
 Without a version, and without `PNPM_VERSION`, it installs the version the project
 in the current directory pins, so CI and Docker builds do not have to name it a
 second time. It reads `devEngines.packageManager`, or else `packageManager`, from
-the project's `package.json` (the workspace root's, in a workspace) the way pnpm
-reads it to switch versions. A range resolves to the version `pnpm-lock.yaml`
+the project's manifest (the workspace root's, for a workspace project) the way
+pnpm reads it to switch versions. A range resolves to the version `pnpm-lock.yaml`
 records while that is still in range, so the pnpm installed is the one the project
 then runs, with no second download. Outside a project, or in one that pins no
 pnpm, it installs `latest`.
