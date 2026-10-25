@@ -77,12 +77,12 @@ describe('readProjectPin', () => {
     assert.equal(pinOf(dir), undefined)
   })
 
-  test('reads no pin from a manifest that is not package.json', () => {
+  test('reads the pin of a package.json5 or package.yaml', () => {
     const json5 = project({ 'package.json5': "{ packageManager: 'pnpm@12.1.0' }" })
-    const yaml = project({ 'package.yaml': 'packageManager: pnpm@12.1.0\n' })
+    const yaml = project({ 'package.yaml': 'devEngines:\n  packageManager:\n    name: pnpm\n    version: ^12.1.0\n' })
 
-    assert.equal(pinOf(json5), undefined)
-    assert.equal(pinOf(yaml), undefined)
+    assert.deepEqual(pinOf(json5), { spec: '12.1.0', field: 'packageManager', manifestPath: path.join(json5, 'package.json5') })
+    assert.deepEqual(pinOf(yaml), { spec: '^12.1.0', field: 'devEngines.packageManager', manifestPath: path.join(yaml, 'package.yaml') })
   })
 
   test('reads a manifest that starts with a byte order mark', () => {
@@ -119,7 +119,7 @@ describe('readProjectPin', () => {
     })
   })
 
-  test('reads the member\'s lockfile when the workspace shares none', () => {
+  test('reads the lockfile of the workspace root even when the workspace shares none', () => {
     const dir = project({
       'pnpm-workspace.yaml': 'packages:\n  - packages/*\nsharedWorkspaceLockfile: false\n',
       'package.json': manifest({ devEngines: { packageManager: { name: 'pnpm', version: '^12.1.0' } } }),
@@ -128,7 +128,97 @@ describe('readProjectPin', () => {
       'packages/member/pnpm-lock.yaml': lockfile('12.2.0'),
     })
 
-    assert.equal(pinOf(path.join(dir, 'packages', 'member'))?.lockedVersion, '12.2.0')
+    assert.equal(pinOf(path.join(dir, 'packages', 'member'))?.lockedVersion, '12.3.0')
+  })
+
+  test('reads the lockfile in lockfileDir, but not a lockfileDir set through include', () => {
+    const files = {
+      'package.json': manifest({ devEngines: { packageManager: { name: 'pnpm', version: '^12.1.0' } } }),
+      'packages/member/package.json': manifest({}),
+      'lock/pnpm-lock.yaml': lockfile('12.3.0'),
+    }
+    const set = project({ ...files, 'pnpm-workspace.yaml': 'packages:\n  - packages/*\nlockfileDir: ./lock\n' })
+    const included = project({
+      ...files,
+      'pnpm-workspace.yaml': 'packages:\n  - packages/*\ninclude:\n  ./settings.yaml: "*"\n',
+      'settings.yaml': 'lockfileDir: ./lock\n',
+    })
+
+    assert.equal(pinOf(path.join(set, 'packages', 'member'))?.lockedVersion, '12.3.0')
+    assert.equal(pinOf(included)?.lockedVersion, undefined)
+  })
+
+  test('falls back to the pin of a member, unlocked, when the workspace root pins nothing', () => {
+    const dir = project({
+      'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+      'package.json': manifest({}),
+      'pnpm-lock.yaml': lockfile('12.3.0'),
+      'packages/member/package.json': manifest({ devEngines: { packageManager: { name: 'pnpm', version: '^12.1.0' } } }),
+      'packages/member/pnpm-lock.yaml': lockfile('12.3.0'),
+    })
+
+    assert.deepEqual(pinOf(path.join(dir, 'packages', 'member')), {
+      spec: '^12.1.0',
+      field: 'devEngines.packageManager',
+      manifestPath: path.join(dir, 'packages', 'member', 'package.json'),
+    })
+  })
+
+  test('reads the pin and lockfile of a project the workspace does not include', () => {
+    const dir = project({
+      'pnpm-workspace.yaml': 'packages:\n  - packages/*\n  - "!packages/excluded"\n',
+      'package.json': manifest({ packageManager: 'pnpm@11.20.0' }),
+      'pnpm-lock.yaml': lockfile('12.2.0'),
+      'other/package.json': manifest({ devEngines: { packageManager: { name: 'pnpm', version: '^12.1.0' } } }),
+      'other/pnpm-lock.yaml': lockfile('12.3.0'),
+      'packages/excluded/package.json': manifest({ packageManager: 'pnpm@12.1.0' }),
+    })
+    const everything = project({
+      'pnpm-workspace.yaml': 'packages:\n  - "**"\n',
+      'package.json': manifest({ packageManager: 'pnpm@11.20.0' }),
+      'node_modules/dep/package.json': manifest({ packageManager: 'pnpm@12.1.0' }),
+    })
+
+    assert.deepEqual(pinOf(path.join(dir, 'other')), {
+      spec: '^12.1.0',
+      field: 'devEngines.packageManager',
+      manifestPath: path.join(dir, 'other', 'package.json'),
+      lockedVersion: '12.3.0',
+    })
+    assert.equal(pinOf(path.join(dir, 'packages', 'excluded'))?.spec, '12.1.0')
+    assert.equal(pinOf(path.join(everything, 'node_modules', 'dep'))?.spec, '12.1.0')
+  })
+
+  test('includes no project but the root in a workspace without packages', () => {
+    const dir = project({
+      'pnpm-workspace.yaml': 'nodeLinker: isolated\n',
+      'package.json': manifest({ packageManager: 'pnpm@11.20.0' }),
+      'packages/member/package.json': manifest({ packageManager: 'pnpm@12.1.0' }),
+    })
+
+    assert.equal(pinOf(path.join(dir, 'packages', 'member'))?.spec, '12.1.0')
+  })
+
+  test('falls back to the pin of the workspace root, unlocked, for a project it does not include', () => {
+    const dir = project({
+      'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+      'package.json': manifest({ devEngines: { packageManager: { name: 'pnpm', version: '^12.1.0' } } }),
+      'pnpm-lock.yaml': lockfile('12.3.0'),
+      'other/package.json': manifest({}),
+      'other/pnpm-lock.yaml': lockfile('12.3.0'),
+    })
+
+    assert.deepEqual(pinOf(path.join(dir, 'other')), {
+      spec: '^12.1.0',
+      field: 'devEngines.packageManager',
+      manifestPath: path.join(dir, 'package.json'),
+    })
+  })
+
+  test('names the pnpm-workspace.yaml that is not valid YAML', () => {
+    const dir = project({ 'pnpm-workspace.yaml': 'packages: [\n', 'package.json': manifest({}) })
+
+    assert.throws(() => pinOf(dir), (err: Error) => err.message.startsWith(`${path.join(dir, 'pnpm-workspace.yaml')} is not valid YAML:`))
   })
 
   test('takes the locked version only while it is in range', () => {

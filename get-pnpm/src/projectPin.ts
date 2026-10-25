@@ -1,6 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { parseJSON5 } from 'confbox/json5'
+import { parseYAML } from 'confbox/yaml'
+import picomatch from 'picomatch'
 import semver from 'semver'
 
 /** The pnpm version a project pins, and where the pin was read from. */
@@ -22,34 +25,77 @@ const MANIFEST_NAMES = ['package.json', 'package.json5', 'package.yaml']
  * The pnpm version that the project `dir` belongs to pins, read the way pnpm
  * reads it to switch to that version.
  *
- * The pin of a workspace is the one in the manifest of its root, the nearest
- * directory up from `dir` with a `pnpm-workspace.yaml`; outside a workspace it
- * is the one in the nearest manifest. `devEngines.packageManager` takes
- * precedence over `packageManager`, which pnpm reads only as an exact version.
- * A range pin comes with the version the lockfile already settled on, which
- * is the one pnpm switches to while it stays in range.
+ * - The workspace is the nearest directory up from `dir` with a
+ *   `pnpm-workspace.yaml`, and the project the nearest one with a manifest.
+ * - The workspace root and the projects its `packages` patterns match read
+ *   the pin of the root's manifest. Any other project reads its own.
+ * - When that manifest pins nothing, the pin of the other one applies.
+ * - `devEngines.packageManager` takes precedence over `packageManager`, which
+ *   pnpm reads only as an exact version.
+ * - A range pin comes with the version the lockfile already settled on, which
+ *   is the one pnpm switches to while it stays in range. For the workspace,
+ *   that lockfile is in `lockfileDir`, or else the root. Any other project
+ *   reads its own. A pin taken from the other manifest has none.
  *
  * `opts.root` stops the search for both at that directory, such as the root
  * of a checkout, which keeps a workspace that happens to sit above it out.
  *
- * @returns `undefined` when there is no pnpm pin to read: no manifest, one
- * that pins no package manager or another one, or a `package.json5` or
- * `package.yaml`, which would each take a parser of their own.
- * @throws if the manifest pins pnpm in a way pnpm itself would reject.
+ * @returns `undefined` when there is no pnpm pin to read: no manifest, or
+ * one that pins no package manager or another one.
+ * @throws if a manifest pins pnpm in a way pnpm itself would reject, or a
+ * manifest or `pnpm-workspace.yaml` cannot be parsed.
  */
 export function readProjectPin (dir: string, opts: { root?: string } = {}): ProjectPin | undefined {
   const start = path.resolve(dir)
   const root = opts.root == null ? undefined : path.resolve(opts.root)
   const workspaceDir = findUp(start, root, (candidate) => fs.existsSync(path.join(candidate, 'pnpm-workspace.yaml')))
   const projectDir = findUp(start, root, (candidate) => MANIFEST_NAMES.some((name) => fs.existsSync(path.join(candidate, name))))
-  const manifest = readManifest(workspaceDir ?? projectDir)
-  const wanted = manifest == null ? undefined : wantedPnpm(manifest)
-  if (wanted == null) return undefined
-  const pin = { ...wanted, manifestPath: manifest!.path }
-  if (semver.valid(pin.spec) != null) return pin
-  const lockfileDir = workspaceDir != null && sharesNoLockfile(workspaceDir) ? projectDir : workspaceDir ?? projectDir
-  const lockedVersion = lockfileDir == null ? undefined : lockedPnpmVersion(lockfileDir, pin.spec)
-  return lockedVersion == null ? pin : { ...pin, lockedVersion }
+  const sources = pinSources(workspaceDir, projectDir)
+  const primary = pinOf(readManifest(sources.primary.manifestDir))
+  if (primary == null) return pinOf(readManifest(sources.fallbackManifestDir))
+  if (semver.valid(primary.spec) != null || sources.primary.lockfileDir == null) return primary
+  const lockedVersion = lockedPnpmVersion(sources.primary.lockfileDir, primary.spec)
+  return lockedVersion == null ? primary : { ...primary, lockedVersion }
+}
+
+interface PinSources {
+  primary: { manifestDir?: string, lockfileDir?: string }
+  fallbackManifestDir?: string
+}
+
+function pinSources (workspaceDir: string | undefined, projectDir: string | undefined): PinSources {
+  if (workspaceDir == null) return { primary: { manifestDir: projectDir, lockfileDir: projectDir } }
+  const workspace = readWorkspaceManifest(workspaceDir)
+  if (projectDir == null || isWorkspaceProject(workspaceDir, workspace, projectDir)) {
+    const lockfileDir = typeof workspace.lockfileDir === 'string' ? path.resolve(workspaceDir, workspace.lockfileDir) : workspaceDir
+    return { primary: { manifestDir: workspaceDir, lockfileDir }, fallbackManifestDir: projectDir }
+  }
+  return { primary: { manifestDir: projectDir, lockfileDir: projectDir }, fallbackManifestDir: workspaceDir }
+}
+
+/**
+ * The top-level settings of `pnpm-workspace.yaml`. Settings that its
+ * `include` delegates to other files are not read, as pnpm does not read them
+ * before it switches.
+ */
+function readWorkspaceManifest (workspaceDir: string): Record<string, unknown> {
+  const file = path.join(workspaceDir, 'pnpm-workspace.yaml')
+  const value = parseYaml(file, fs.readFileSync(file, 'utf8'))
+  return isRecord(value) ? value : {}
+}
+
+/**
+ * Whether `projectDir` is the workspace root or a project its `packages`
+ * patterns match. Without `packages`, the root is the only one.
+ */
+function isWorkspaceProject (workspaceDir: string, workspace: Record<string, unknown>, projectDir: string): boolean {
+  const relative = path.relative(workspaceDir, projectDir).split(path.sep).join('/')
+  if (relative === '') return true
+  if (relative.startsWith('../') || relative.split('/').some((part) => part === 'node_modules' || part === 'bower_components')) return false
+  const patterns = Array.isArray(workspace.packages) ? workspace.packages.filter((pattern) => typeof pattern === 'string') : []
+  const matches = (pattern: string): boolean => picomatch.isMatch(relative, pattern.replace(/^\.\//, '').replace(/\/$/, ''))
+  const excludes = patterns.filter((pattern) => pattern.startsWith('!')).map((pattern) => pattern.slice(1))
+  return !excludes.some(matches) && patterns.filter((pattern) => !pattern.startsWith('!')).some(matches)
 }
 
 interface Manifest {
@@ -63,21 +109,35 @@ function readManifest (dir: string | undefined): Manifest | undefined {
     const manifestPath = path.join(dir, name)
     const content = readOptionalFile(manifestPath)
     if (content == null) continue
-    if (name !== 'package.json') return undefined
-    const value = parseJson(manifestPath, content)
+    const value = parseManifest(manifestPath, content)
     if (!isRecord(value)) throw new Error(`${manifestPath} does not hold an object.`)
     return { path: manifestPath, value }
   }
   return undefined
 }
 
-function parseJson (file: string, content: string): unknown {
+function parseManifest (file: string, content: string): unknown {
+  if (file.endsWith('.yaml')) return parseYaml(file, content)
   try {
     // Windows tools write a byte order mark, which pnpm reads past.
-    return JSON.parse(content.replace(/^\uFEFF/, ''))
+    const text = content.replace(/^\uFEFF/, '')
+    return file.endsWith('.json5') ? parseJSON5(text) : JSON.parse(text)
   } catch (err) {
-    throw new Error(`${file} is not valid JSON: ${(err as Error).message}`, { cause: err })
+    throw new Error(`${file} is not valid ${file.endsWith('.json5') ? 'JSON5' : 'JSON'}: ${(err as Error).message}`, { cause: err })
   }
+}
+
+function parseYaml (file: string, content: string): unknown {
+  try {
+    return parseYAML(content)
+  } catch (err) {
+    throw new Error(`${file} is not valid YAML: ${(err as Error).message}`, { cause: err })
+  }
+}
+
+function pinOf (manifest: Manifest | undefined): ProjectPin | undefined {
+  const wanted = manifest == null ? undefined : wantedPnpm(manifest)
+  return wanted == null ? undefined : { ...wanted, manifestPath: manifest!.path }
 }
 
 function wantedPnpm (manifest: Manifest): Pick<ProjectPin, 'spec' | 'field'> | undefined {
@@ -114,18 +174,12 @@ function devEnginesPackageManager (manifest: Record<string, unknown>): Record<st
   return entries.find((entry) => entry.name === 'pnpm') ?? entries[0]
 }
 
-/** Whether every project of the workspace keeps a lockfile of its own. */
-function sharesNoLockfile (workspaceDir: string): boolean {
-  const workspace = fs.readFileSync(path.join(workspaceDir, 'pnpm-workspace.yaml'), 'utf8')
-  // A top-level key, so it starts a line of its own.
-  return /^sharedWorkspaceLockfile:\s*false\s*(?:#.*)?$/m.test(workspace)
-}
-
 function lockedPnpmVersion (lockfileDir: string, range: string): string | undefined {
-  const content = readOptionalFile(path.join(lockfileDir, 'pnpm-lock.yaml'))
+  const lockfilePath = path.join(lockfileDir, 'pnpm-lock.yaml')
+  const content = readOptionalFile(lockfilePath)
   const envDocument = content == null ? undefined : extractEnvDocument(content)
   if (envDocument == null) return undefined
-  const locked = blockScalarAt(envDocument, ['importers', '.', 'packageManagerDependencies', 'pnpm', 'version'])
+  const locked = valueAt(parseYaml(lockfilePath, envDocument), ['importers', '.', 'packageManagerDependencies', 'pnpm', 'version'])
   // In range the way pnpm checks a locked version, prereleases included.
   if (typeof locked !== 'string' || semver.valid(locked) == null) return undefined
   return semver.satisfies(locked, range, { includePrerelease: true }) ? locked : undefined
@@ -143,37 +197,8 @@ function extractEnvDocument (content: string): string | undefined {
   return end === -1 ? normalized.slice(4).replace(/\n---\n?$/, '') : normalized.slice(4, end)
 }
 
-/**
- * The scalar at `keys` in `yaml`, read as the block mappings pnpm writes its
- * lockfile in: a `key:` per line, nested by indentation, with a plain or
- * quoted value. That is all the env document holds on the way to the pnpm
- * version, and it keeps a YAML parser out of the dependencies.
- */
-function blockScalarAt (yaml: string, keys: string[]): string | undefined {
-  const path: Array<{ indent: number, key: string }> = []
-  for (const line of yaml.split('\n')) {
-    const entry = parseBlockLine(line)
-    if (entry == null) continue
-    while (path.length > 0 && path.at(-1)!.indent >= entry.indent) path.pop()
-    path.push(entry)
-    if (path.length === keys.length && path.every(({ key }, index) => key === keys[index])) {
-      return entry.value
-    }
-  }
-  return undefined
-}
-
-function parseBlockLine (line: string): { indent: number, key: string, value?: string } | undefined {
-  const match = /^( *)('[^']*'|"[^"]*"|[^\s'"#][^:]*):(?: (.*))?$/.exec(line)
-  if (match == null) return undefined
-  const value = match[3]?.trim()
-  return { indent: match[1]!.length, key: unquote(match[2]!), value: value ? unquote(value) : undefined }
-}
-
-function unquote (scalar: string): string {
-  if (scalar.length >= 2 && scalar.startsWith("'") && scalar.endsWith("'")) return scalar.slice(1, -1).replaceAll("''", "'")
-  if (scalar.length >= 2 && scalar.startsWith('"') && scalar.endsWith('"')) return scalar.slice(1, -1)
-  return scalar
+function valueAt (value: unknown, keys: string[]): unknown {
+  return keys.reduce<unknown>((current, key) => isRecord(current) ? current[key] : undefined, value)
 }
 
 export function findUp (start: string, root: string | undefined, matches: (dir: string) => boolean): string | undefined {
