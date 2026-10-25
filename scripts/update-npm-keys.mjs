@@ -23,8 +23,10 @@ const PS_FILE = path.join(ROOT, 'install.ps1')
 
 const update = process.argv.includes('--update')
 const keys = (await fetchKeys()).filter((key) => key.withdrawn !== true)
-const current = keys.find((key) => key.expires == null) ?? keys[0]
-if (!current) throw new Error(`No usable keys in ${KEYS_URL}`)
+// No fallback: pinning an expired key would leave the installers refusing
+// every release signed with the current one.
+const current = keys.find((key) => key.expires == null)
+if (!current) throw new Error(`${KEYS_URL} lists no current key, one without an expiry that is not withdrawn`)
 
 const changes = [
   { file: SH_FILE, next: replaceShellKey(fs.readFileSync(SH_FILE, 'utf8'), current) },
