@@ -1,7 +1,6 @@
 export { type CorepackDownloadOptions, corepackDownloadOptions } from './corepack.js'
 export { type DownloadExecutableOptions, downloadPnpmExecutable } from './downloadExecutable.js'
 export { downloadPnpm, runCli } from './install.js'
-export { isMusl, platformPackageName, type Target } from './platformPackageName.js'
 export { type ProjectPin, readProjectPin } from './projectPin.js'
 export type { RequestHeaders } from './registry.js'
 export type { SigningKey } from './verifySignature.js'

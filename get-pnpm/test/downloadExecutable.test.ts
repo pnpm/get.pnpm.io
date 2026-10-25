@@ -10,7 +10,8 @@ import type { Duplex } from 'node:stream'
 import { after, before, beforeEach, describe, test } from 'node:test'
 import zlib from 'node:zlib'
 
-import { downloadPnpmExecutable, platformPackageName } from '../lib/index.js'
+import { downloadPnpmExecutable } from '../lib/index.js'
+import { platformPackageName } from '../lib/platformPackageName.js'
 import type { SigningKey } from '../lib/verifySignature.js'
 
 const VERSION = '99.0.0'
