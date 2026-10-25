@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
-import { downloadPnpm, installPnpm } from '../lib/index.js'
+import { downloadPnpm, installPnpm } from '../lib/install.js'
 import type { SigningKey } from '../lib/verifySignature.js'
 
 const VERSION = '99.0.0'

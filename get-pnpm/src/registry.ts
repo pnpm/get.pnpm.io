@@ -22,11 +22,6 @@ const ABBREVIATED_PACKUMENT = 'application/vnd.npm.install-v1+json'
 
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org/'
 
-/** The registry npx/npm is configured with, so a mirror stays a mirror. */
-export function registryFromEnv (): string {
-  return normalizeRegistry(process.env.npm_config_registry ?? process.env.NPM_CONFIG_REGISTRY ?? DEFAULT_REGISTRY)
-}
-
 /**
  * A registry URL that can be used as a base for a relative path.
  *
