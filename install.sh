@@ -493,7 +493,7 @@ download_and_install() {
     mv "$tmp_dir/unpacked/package/dist" "$tmp_dir/dist" || return 1
 
     chmod +x "$tmp_dir/$executable"
-    SHELL="$SHELL" "$tmp_dir/$executable" setup --force || return 1
+    run_setup "$tmp_dir/$executable" "$version" || return 1
     return 0
   fi
 
@@ -504,12 +504,12 @@ download_and_install() {
     if [ "${platform}" = "win32" ]; then
       download "https://github.com/pnpm/pnpm/releases/download/v${version}/${asset_base}.zip" > "$tmp_dir/pnpm.zip" || return 1
       unzip -q "$tmp_dir/pnpm.zip" -d "$tmp_dir" || return 1
-      SHELL="$SHELL" "$tmp_dir/pnpm.exe" setup --force || return 1
+      run_setup "$tmp_dir/pnpm.exe" "$version" || return 1
     else
       download "https://github.com/pnpm/pnpm/releases/download/v${version}/${asset_base}.tar.gz" > "$tmp_dir/pnpm.tar.gz" || return 1
       tar -xzf "$tmp_dir/pnpm.tar.gz" -C "$tmp_dir" || return 1
       chmod +x "$tmp_dir/pnpm"
-      SHELL="$SHELL" "$tmp_dir/pnpm" setup --force || return 1
+      run_setup "$tmp_dir/pnpm" "$version" || return 1
     fi
   else
     # older versions: distributed as a single executable binary
@@ -520,8 +520,31 @@ download_and_install() {
     fi
     download "$archive_url" > "$tmp_dir/pnpm" || return 1
     chmod +x "$tmp_dir/pnpm"
-    SHELL="$SHELL" "$tmp_dir/pnpm" setup --force || return 1
+    run_setup "$tmp_dir/pnpm" "$version" || return 1
   fi
+}
+
+# Whether `pnpm setup` adds pnpm to PATH. Setting PNPM_NO_MODIFY_PATH to anything
+# but "", "0", or "false" leaves the shell config alone.
+modify_path() {
+  case "${PNPM_NO_MODIFY_PATH:-}" in
+    '' | 0 | false | FALSE | False) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Run `pnpm setup` with the executable "$1", which is pnpm "$2". Most pnpm
+# releases predate `pnpm setup --no-modify-path`, so its help is checked before
+# setup gets the chance to change anything.
+run_setup() {
+  if modify_path; then
+    SHELL="$SHELL" "$1" setup --force
+    return
+  fi
+  "$1" setup --help 2>/dev/null | grep -q -- '--no-modify-path' || abort \
+    "pnpm $2 cannot be installed without adding it to PATH: its \`pnpm setup\` has no --no-modify-path option." \
+    "Install a newer pnpm, or unset PNPM_NO_MODIFY_PATH."
+  SHELL="$SHELL" "$1" setup --force --no-modify-path
 }
 
 # Where `pnpm setup` installs: PNPM_HOME, or pnpm's default for the platform,
@@ -674,7 +697,11 @@ warn_if_pnpm_is_shadowed() {
 # output rather than guessing the file again. On Windows, setup edits the user
 # environment instead.
 print_undo_hint() {
-  if [ "$(detect_platform)" = 'win32' ]; then
+  if ! modify_path; then
+    printf '%s\n' \
+      "To uninstall, delete $(pnpm_home_dir)." \
+      "See https://pnpm.io/uninstall"
+  elif [ "$(detect_platform)" = 'win32' ]; then
     printf '%s\n' \
       "To uninstall, delete the PNPM_HOME directory, then remove the PNPM_HOME variable and the Path entry pnpm setup added from your user environment variables." \
       "See https://pnpm.io/uninstall"

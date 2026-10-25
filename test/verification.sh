@@ -48,7 +48,7 @@ run_installer() {
       set +e
       # NO_COLOR keeps PowerShell from threading escape sequences through the
       # error text, which would otherwise land inside the phrases matched below.
-      output="$(cd "$home" && HOME="$home" PNPM_HOME="$home/pnpm" PNPM_VERSION="$version" \
+      output="$(cd "$home" && HOME="$home" PNPM_HOME="$home/pnpm" PNPM_VERSION="$version" PNPM_NO_MODIFY_PATH="${no_modify_path:-}" \
         NO_COLOR=1 pwsh -NoProfile "$work/patched.ps1" 2>&1)"
       code=$?
       set -e
@@ -57,7 +57,7 @@ run_installer() {
       sed "s|NPM_REGISTRY='https://registry.npmjs.org'|NPM_REGISTRY='http://127.0.0.1:$port'|" \
         "$root/$script" > "$work/patched.sh"
       set +e
-      output="$(cd "$home" && HOME="$home" PNPM_HOME="$home/pnpm" PNPM_VERSION="$version" \
+      output="$(cd "$home" && HOME="$home" PNPM_HOME="$home/pnpm" PNPM_VERSION="$version" PNPM_NO_MODIFY_PATH="${no_modify_path:-}" \
         SHELL=/bin/sh sh "$work/patched.sh" 2>&1)"
       code=$?
       set -e
@@ -115,6 +115,15 @@ expect_refusal no-signature 'carries no npm registry signature' 8973
 expect_refusal wrong-keyid 'unexpected npm key' 8974
 expect_refusal no-integrity 'published no checksum' 8975
 expect_install flaky 8976
+
+# 12.15.0 predates `pnpm setup --no-modify-path`, so asking for it is refused
+# before setup can edit anything.
+latest_version="$version"
+version=12.15.0
+no_modify_path=1
+expect_refusal intact 'has no --no-modify-path option' 8977
+version="$latest_version"
+no_modify_path=
 
 [ "$failures" -eq 0 ] || { echo "$failures case(s) failed"; exit 1; }
 echo "all verification failures are refused, and transient ones are retried"

@@ -399,7 +399,26 @@ if ($platform -ne 'win32') {
   chmod +x $tempFile
 }
 
-$setup = Start-Process -FilePath $tempFile -ArgumentList "setup" -NoNewWindow -Wait -PassThru -ErrorAction Continue
+# Setting PNPM_NO_MODIFY_PATH to anything but "", "0", or "false" leaves the
+# shell config and the registry alone.
+$modifyPath = $env:PNPM_NO_MODIFY_PATH -in @($null, '', '0', 'false')
+$setupArgs = @('setup')
+if (-not $modifyPath) {
+  # Most pnpm releases predate `pnpm setup --no-modify-path`, so its help is
+  # checked before setup gets the chance to change anything.
+  # Under 'Stop', Windows PowerShell turns a native command's stderr into a
+  # terminating error.
+  $ErrorActionPreference = 'Continue'
+  $setupHelp = (& $tempFile setup --help 2>$null) -join "`n"
+  $ErrorActionPreference = 'Stop'
+  if ($setupHelp -notmatch '--no-modify-path') {
+    Remove-Item $tempFileFolder -Recurse -Force
+    throw "pnpm $version cannot be installed without adding it to PATH: its ``pnpm setup`` has no --no-modify-path option. Install a newer pnpm, or unset PNPM_NO_MODIFY_PATH."
+  }
+  $setupArgs += '--no-modify-path'
+}
+
+$setup = Start-Process -FilePath $tempFile -ArgumentList $setupArgs -NoNewWindow -Wait -PassThru -ErrorAction Continue
 
 Remove-Item $tempFileFolder -Recurse -Force
 
@@ -515,7 +534,9 @@ function Write-ShadowingPnpmWarning {
 # environment instead.
 function Write-UndoHint {
   $pnpmHome = Get-PnpmHomeDir
-  if ($platform -eq 'win32') {
+  if (-not $modifyPath) {
+    Write-Host "To uninstall, delete $pnpmHome."
+  } elseif ($platform -eq 'win32') {
     Write-Host "To uninstall, delete $pnpmHome, then remove the PNPM_HOME variable and the Path entry pnpm setup added from your user environment variables."
   } else {
     Write-Host "To uninstall, delete $pnpmHome and the lines pnpm setup added to the shell config file named above."
