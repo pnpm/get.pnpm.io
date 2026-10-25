@@ -23,7 +23,7 @@ interface NpmrcCandidate {
 }
 
 /** The settings of one config source, in file order. */
-interface ConfigSource {
+export interface ConfigSource {
   /** What a relative `cafile` in this source is resolved against. */
   dir: string
   entries: Array<[string, string]>
@@ -169,7 +169,7 @@ function authTokenScope (key: string, protocol: string): { host: string, pathnam
  * and those scoped to the longest `//host/path/` prefix of `registry`. A
  * `cafile` that cannot be read adds nothing, as in pnpm.
  */
-function certificateAuthorities (registry: string, sources: ConfigSource[]): string[] {
+export function certificateAuthorities (registry: string, sources: ConfigSource[]): string[] {
   const topLevel = sources.find((source) => source.entries.some(([key]) => CA_SETTINGS.includes(key)))
   const settings: CaSetting[] = (topLevel?.entries ?? [])
     .filter(([key]) => CA_SETTINGS.includes(key))
@@ -299,7 +299,7 @@ function normalizedPath (pathname: string): string {
   return pathname.endsWith('/') ? pathname : `${pathname}/`
 }
 
-function stripQuotes (value: string): string {
+export function stripQuotes (value: string): string {
   if (value.length < 2) return value
   const first = value[0]
   const last = value[value.length - 1]

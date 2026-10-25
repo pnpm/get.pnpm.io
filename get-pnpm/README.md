@@ -164,6 +164,23 @@ await downloadPnpmExecutable({
 })
 ```
 
+The registry options of all three can come from `pnpmRegistryConfig`. It reads
+the registry, credentials, and CA certificates from the `.npmrc` files the way
+pnpm reads them for its own packages, `@pnpm:registry` included. The project
+`.npmrc` is read only when you pass `readProjectNpmrc: true`. Pass it only when
+the download's signature is checked, because a repository that picks the
+registry of an unchecked download picks the executable too.
+
+```js
+import { downloadPnpmExecutable, pnpmRegistryConfig } from 'get-pnpm'
+
+await downloadPnpmExecutable({
+  version: '12.0.0',
+  destPath: '/opt/pnpm/pnpm',
+  ...pnpmRegistryConfig({ readProjectNpmrc: true }),
+})
+```
+
 It verifies exactly what the other two do, and reads the archive in-process
 rather than shelling out to `tar`, so it works where no `tar` is on the PATH.
 Placement is atomic and tolerates losing a race with a concurrent call.

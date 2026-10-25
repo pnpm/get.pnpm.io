@@ -176,7 +176,7 @@ function unquote (scalar: string): string {
   return scalar
 }
 
-function findUp (start: string, root: string | undefined, matches: (dir: string) => boolean): string | undefined {
+export function findUp (start: string, root: string | undefined, matches: (dir: string) => boolean): string | undefined {
   for (let dir = start; ; dir = path.dirname(dir)) {
     if (matches(dir)) return dir
     if (dir === root || path.dirname(dir) === dir) return undefined
