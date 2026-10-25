@@ -2,8 +2,9 @@ name: npm signing keys
 
 on:
   schedule:
-    # Weekly. A rotation npm has not announced would otherwise surface as a
-    # failed install for whoever runs the installer next.
+    # Weekly. A rotation would otherwise surface as a failed install for
+    # whoever runs the installer next. pnpm/pnpm refreshes the key list from
+    # npm in each of its release PRs.
     - cron: '0 6 * * 1'
   workflow_dispatch:
 
@@ -54,7 +55,7 @@ jobs:
           git push --force origin "$branch"
           if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
             gh pr create --head "$branch" --title 'chore: refresh the pinned npm signing keys' --body \
-              'npm rotated its registry signing key. Every installer pins it, so all three files change together.
+              'The current npm registry signing key in pnpm/pnpm'"'"'s `.config/npm-signing-keys.json` changed. `install.sh` and `install.ps1` pin it.
 
             The checksums in `SHASUMS256.txt` cover `install.sh` and `install.ps1`, so this needs a re-sign (`./_update.sh`) before merge.'
           fi

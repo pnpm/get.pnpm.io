@@ -1,53 +1,44 @@
 #!/usr/bin/env node
-// Keeps the pinned npm registry signing keys in sync with
+// Keeps the npm registry signing key that install.sh and install.ps1 pin in
+// sync with pnpm/pnpm's .config/npm-signing-keys.json, the one list that pnpm,
+// get-pnpm, and these installers share. pnpm/pnpm refreshes it from
 // https://registry.npmjs.org/-/npm/v1/keys.
 //
 //   node scripts/update-npm-keys.mjs            # check, non-zero on drift
-//   node scripts/update-npm-keys.mjs --update   # rewrite the pinned keys
+//   node scripts/update-npm-keys.mjs --update   # rewrite the pinned key
 //
-// Three installers pin these: install.sh, install.ps1 and the get-pnpm package.
-// They are updated together, because a rotation that reaches only some of them
-// leaves the rest refusing to install anything.
-//
-// The pinned set is exactly what npm advertises. A key npm has withdrawn is not
-// kept for verifying older packages: a signature carries no trusted timestamp,
-// so a signature made before a withdrawal cannot be told apart from one forged
-// after it. These installers only ever fetch current releases, so following
-// npm's set costs nothing and keeps withdrawal meaning withdrawal.
-//
-// The shell and PowerShell installers carry only the current key; the package
-// carries every key npm lists, expiry included, and rejects an expired one.
+// The installers pin the current key, the one without an expiry. A key the
+// list marks withdrawn is never used: a signature carries no trusted
+// timestamp, so one made before a withdrawal cannot be told apart from one
+// forged after it, and these installers only ever fetch current releases.
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const KEYS_URL = 'https://registry.npmjs.org/-/npm/v1/keys'
+const KEYS_URL = 'https://raw.githubusercontent.com/pnpm/pnpm/main/.config/npm-signing-keys.json'
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
-const KEY_FIELDS = ['expires', 'keyid', 'keytype', 'scheme', 'key']
 
-const JS_KEYS_FILE = path.join(ROOT, 'get-pnpm', 'src', 'npmSigningKeys.ts')
 const SH_FILE = path.join(ROOT, 'install.sh')
 const PS_FILE = path.join(ROOT, 'install.ps1')
 
 const update = process.argv.includes('--update')
-const npmKeys = await fetchNpmKeys()
-const current = npmKeys.find((key) => key.expires == null) ?? npmKeys[0]
-if (!current) throw new Error(`No keys in ${KEYS_URL}`)
-
-const merged = [...npmKeys].sort((a, b) => a.keyid.localeCompare(b.keyid))
+const keys = (await fetchKeys()).filter((key) => key.withdrawn !== true)
+// No fallback: pinning an expired key would leave the installers refusing
+// every release signed with the current one.
+const current = keys.find((key) => key.expires == null)
+if (!current) throw new Error(`${KEYS_URL} lists no current key, one without an expiry that is not withdrawn`)
 
 const changes = [
-  { file: JS_KEYS_FILE, next: renderKeysModule(merged) },
   { file: SH_FILE, next: replaceShellKey(fs.readFileSync(SH_FILE, 'utf8'), current) },
   { file: PS_FILE, next: replacePowerShellKey(fs.readFileSync(PS_FILE, 'utf8'), current) },
 ].filter(({ file, next }) => fs.readFileSync(file, 'utf8') !== next)
 
 if (!update) {
   if (changes.length === 0) {
-    console.log(`✓ Pinned npm signing keys are up to date (${merged.length} key(s)).`)
+    console.log(`✓ The pinned npm signing key is ${current.keyid}, as pnpm/pnpm lists it.`)
     process.exit(0)
   }
-  console.error('✗ Pinned npm signing keys are out of date:')
+  console.error('✗ The pinned npm signing key is out of date:')
   for (const { file } of changes) console.error(`  - ${path.relative(ROOT, file)}`)
   console.error('\nRun: node scripts/update-npm-keys.mjs --update')
   process.exit(1)
@@ -59,30 +50,12 @@ for (const { file, next } of changes) {
 }
 console.log(changes.length === 0 ? '✓ Already current.' : `✓ Updated ${changes.length} file(s).`)
 
-async function fetchNpmKeys () {
+async function fetchKeys () {
   const res = await fetch(KEYS_URL)
   if (!res.ok) throw new Error(`Failed to fetch ${KEYS_URL}: ${res.status}`)
-  const body = await res.json()
-  if (!Array.isArray(body?.keys)) throw new Error(`Unexpected response from ${KEYS_URL}`)
-  return body.keys.map((key) => Object.fromEntries(KEY_FIELDS.map((f) => [f, key[f] ?? null])))
-}
-
-function renderKeysModule (keys) {
-  return `/* eslint-disable */
-// GENERATED — npm's public registry signing keys, mirrored from
-// ${KEYS_URL}
-//
-// Refresh with: node scripts/update-npm-keys.mjs --update
-// A scheduled workflow runs the check, so a rotation arrives as a pull request
-// rather than as a failed install.
-export const NPM_SIGNING_KEYS = ${JSON.stringify(keys, KEY_FIELDS, 2)} as const satisfies ReadonlyArray<{
-  expires: string | null
-  keyid: string
-  keytype: string
-  scheme: string
-  key: string
-}>
-`
+  const keys = await res.json()
+  if (!Array.isArray(keys)) throw new Error(`Unexpected content in ${KEYS_URL}`)
+  return keys
 }
 
 function replaceShellKey (source, key) {
