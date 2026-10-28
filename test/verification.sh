@@ -35,7 +35,9 @@ run_installer() {
   # flaky mode saves for the installer.
   while ! curl -sS -o /dev/null "http://127.0.0.1:$port/" > /dev/null 2>&1; do
     i=$((i + 1))
-    [ "$i" -lt 50 ] || { echo "mock registry did not start"; cat "$work/server.log"; exit 1; }
+    # The mock downloads the real pnpm tarballs before it listens, which can
+    # take tens of seconds on a CI runner.
+    [ "$i" -lt 300 ] || { echo "mock registry did not start"; cat "$work/server.log"; exit 1; }
     sleep 0.2
   done
 
