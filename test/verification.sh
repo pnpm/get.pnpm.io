@@ -41,6 +41,9 @@ run_installer() {
 
   home="$work/home-$mode"
   mkdir -p "$home"
+  # The installer runs from $home, so this makes it a project whose `setup`
+  # script would replace a built-in `pnpm setup` not forced with `pm`.
+  echo '{"scripts":{"setup":"touch hijacked"}}' > "$home/package.json"
   case "$script" in
     *.ps1)
       sed "s|\$NpmRegistry = 'https://registry.npmjs.org'|\$NpmRegistry = 'http://127.0.0.1:$port'|" \
@@ -49,7 +52,7 @@ run_installer() {
       # NO_COLOR keeps PowerShell from threading escape sequences through the
       # error text, which would otherwise land inside the phrases matched below.
       output="$(cd "$home" && HOME="$home" PNPM_HOME="$home/pnpm" PNPM_VERSION="$version" PNPM_NO_MODIFY_PATH="${no_modify_path:-}" \
-        NO_COLOR=1 pwsh -NoProfile "$work/patched.ps1" 2>&1)"
+        SHELL="${setup_shell:-${SHELL:-}}" NO_COLOR=1 pwsh -NoProfile "$work/patched.ps1" 2>&1)"
       code=$?
       set -e
       ;;
@@ -58,7 +61,7 @@ run_installer() {
         "$root/$script" > "$work/patched.sh"
       set +e
       output="$(cd "$home" && HOME="$home" PNPM_HOME="$home/pnpm" PNPM_VERSION="$version" PNPM_NO_MODIFY_PATH="${no_modify_path:-}" \
-        SHELL=/bin/sh sh "$work/patched.sh" 2>&1)"
+        SHELL="${setup_shell:-/bin/sh}" sh "$work/patched.sh" 2>&1)"
       code=$?
       set -e
       ;;
@@ -104,6 +107,9 @@ expect_install() {
   elif ! [ -e "$home/pnpm/bin/pnpm" ] && ! [ -e "$home/pnpm/bin/pnpm.exe" ]; then
     echo "FAIL [$mode] the installer exited 0, yet pnpm was not installed"
     failures=$((failures + 1))
+  elif [ -e "$home/hijacked" ]; then
+    echo "FAIL [$mode] the project's setup script ran instead of pnpm setup"
+    failures=$((failures + 1))
   else
     echo "ok   [$mode] installed"
   fi
@@ -117,12 +123,24 @@ expect_refusal no-integrity 'published no checksum' 8975
 expect_install flaky 8976
 
 # 12.15.0 predates `pnpm setup --no-modify-path`, so asking for it is refused
-# before setup can edit anything.
+# before anything is downloaded.
 latest_version="$version"
 version=12.15.0
 no_modify_path=1
-expect_refusal intact 'has no --no-modify-path option' 8977
+expect_refusal intact 'PNPM_NO_MODIFY_PATH needs pnpm 12.16.0 or newer' 8977
 version="$latest_version"
+
+# With the option, pnpm is installed and no shell config file is written. A
+# bash setup would otherwise write .bashrc; a plain sh one has no file to write.
+setup_shell=/bin/bash
+expect_install intact 8978
+setup_shell=
+for rc in .profile .bashrc .bash_profile .zshrc .config/fish/config.fish .config/powershell/Microsoft.PowerShell_profile.ps1; do
+  if [ -e "$home/$rc" ]; then
+    echo "FAIL [no-modify-path] the installer wrote $rc"
+    failures=$((failures + 1))
+  fi
+done
 no_modify_path=
 
 [ "$failures" -eq 0 ] || { echo "$failures case(s) failed"; exit 1; }

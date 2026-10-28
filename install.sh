@@ -442,6 +442,7 @@ download_and_install() {
   esac
 
   assert_target_is_built "$platform" "$arch" "$major_version"
+  assert_can_leave_path_alone "$version"
 
   # Intel macOS isn't supported on pnpm v11 only: the SEA binary produced
   # by Node.js for darwin-x64 segfaults at startup because of an upstream
@@ -525,26 +526,54 @@ download_and_install() {
 }
 
 # Whether `pnpm setup` adds pnpm to PATH. Setting PNPM_NO_MODIFY_PATH to anything
-# but "", "0", or "false" leaves the shell config alone.
+# but "", "0", or "false" (in any case) leaves the shell config alone.
 modify_path() {
-  case "${PNPM_NO_MODIFY_PATH:-}" in
-    '' | 0 | false | FALSE | False) return 0 ;;
+  case "$(printf '%s' "${PNPM_NO_MODIFY_PATH:-}" | tr '[:upper:]' '[:lower:]')" in
+    '' | 0 | false) return 0 ;;
     *) return 1 ;;
   esac
 }
 
-# Run `pnpm setup` with the executable "$1", which is pnpm "$2". Most pnpm
-# releases predate `pnpm setup --no-modify-path`, so its help is checked before
-# setup gets the chance to change anything.
-run_setup() {
-  if modify_path; then
-    SHELL="$SHELL" "$1" setup --force
-    return
+# Whether pnpm "$1" is release "$2" (major.minor.patch) or newer. A prerelease
+# of "$2" is older.
+version_at_least() {
+  local core="${1%%[-+]*}"
+  if [ "$core" = "$2" ] && [ "$core" != "$1" ]; then
+    return 1
   fi
-  "$1" setup --help 2>/dev/null | grep -q -- '--no-modify-path' || abort \
-    "pnpm $2 cannot be installed without adding it to PATH: its \`pnpm setup\` has no --no-modify-path option." \
+  local IFS=.
+  # shellcheck disable=SC2086 # split both versions on the dots
+  set -- $core $2
+  if [ "$1" -ne "$4" ]; then [ "$1" -gt "$4" ]; return; fi
+  if [ "$2" -ne "$5" ]; then [ "$2" -gt "$5" ]; return; fi
+  [ "$3" -ge "$6" ]
+}
+
+# Refuse PNPM_NO_MODIFY_PATH for pnpm "$1" if its `pnpm setup` has no
+# --no-modify-path, before anything is downloaded.
+assert_can_leave_path_alone() {
+  modify_path || version_at_least "$1" 12.16.0 || abort \
+    "pnpm $1 cannot be installed without adding it to PATH: PNPM_NO_MODIFY_PATH needs pnpm 12.16.0 or newer." \
     "Install a newer pnpm, or unset PNPM_NO_MODIFY_PATH."
-  SHELL="$SHELL" "$1" setup --force --no-modify-path
+}
+
+# Run the built-in `pnpm setup` with the executable "$1", which is pnpm "$2".
+# From pnpm 11, a `setup` script in the current project replaces the built-in
+# unless the `pm` prefix forces it. pnpm 12.0.0 was released without the prefix.
+run_setup() {
+  local major
+  major="${2%%.*}"
+  if version_at_least "$2" 12.1.0 || { [ "$major" = 11 ] && version_at_least "$2" 11.0.0; }; then
+    set -- "$1" "$2" pm setup --force
+  else
+    set -- "$1" "$2" setup --force
+  fi
+  if ! modify_path; then
+    set -- "$@" --no-modify-path
+  fi
+  local executable="$1"
+  shift 2
+  SHELL="$SHELL" "$executable" "$@"
 }
 
 # Where `pnpm setup` installs: PNPM_HOME, or pnpm's default for the platform,

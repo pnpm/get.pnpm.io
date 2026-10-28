@@ -124,6 +124,27 @@ function Use-LegacyAssets {
   return $false
 }
 
+# Whether pnpm $Version is release $Minimum (major.minor.patch) or newer. A
+# prerelease of $Minimum is older. Same rule as install.sh.
+function Test-VersionAtLeast {
+  param([string]$Version, [string]$Minimum)
+  $core = ($Version -split '[-+]')[0]
+  if ($core -eq $Minimum -and $core -ne $Version) { return $false }
+  return [version]$core -ge [version]$Minimum
+}
+
+# The arguments that run the built-in `pnpm setup` of pnpm $Version. From pnpm
+# 11, a `setup` script in the current project replaces the built-in unless the
+# `pm` prefix forces it. pnpm 12.0.0 was released without the prefix.
+function Get-SetupArgs {
+  param([string]$Version)
+  $major = [int]($Version -split '\.')[0]
+  if ((Test-VersionAtLeast $Version '12.1.0') -or ($major -eq 11 -and (Test-VersionAtLeast $Version '11.0.0'))) {
+    return @('pm', 'setup')
+  }
+  return @('setup')
+}
+
 # Map the new-scheme target back to the legacy asset basename used by
 # pre-rename pnpm releases. Arch is unchanged.
 function Get-LegacyAssetBasename {
@@ -343,6 +364,13 @@ if ($null -eq $version) {
   Write-Error "Sorry! pnpm '$preferredVersion' version could not be found. Use a major, or one of the tags or published versions from the provided list"
 }
 
+# Setting PNPM_NO_MODIFY_PATH to anything but "", "0", or "false" leaves the
+# shell config and the registry alone.
+$modifyPath = $env:PNPM_NO_MODIFY_PATH -in @($null, '', '0', 'false')
+if (-not $modifyPath -and -not (Test-VersionAtLeast $version '12.16.0')) {
+  throw "pnpm $version cannot be installed without adding it to PATH: PNPM_NO_MODIFY_PATH needs pnpm 12.16.0 or newer. Install a newer pnpm, or unset PNPM_NO_MODIFY_PATH."
+}
+
 $tempFileFolder = New-TemporaryDirectory
 $majorVersion = [int]($version -split '\.')[0]
 
@@ -399,22 +427,8 @@ if ($platform -ne 'win32') {
   chmod +x $tempFile
 }
 
-# Setting PNPM_NO_MODIFY_PATH to anything but "", "0", or "false" leaves the
-# shell config and the registry alone.
-$modifyPath = $env:PNPM_NO_MODIFY_PATH -in @($null, '', '0', 'false')
-$setupArgs = @('setup')
+$setupArgs = @(Get-SetupArgs $version)
 if (-not $modifyPath) {
-  # Most pnpm releases predate `pnpm setup --no-modify-path`, so its help is
-  # checked before setup gets the chance to change anything.
-  # Under 'Stop', Windows PowerShell turns a native command's stderr into a
-  # terminating error.
-  $ErrorActionPreference = 'Continue'
-  $setupHelp = (& $tempFile setup --help 2>$null) -join "`n"
-  $ErrorActionPreference = 'Stop'
-  if ($setupHelp -notmatch '--no-modify-path') {
-    Remove-Item $tempFileFolder -Recurse -Force
-    throw "pnpm $version cannot be installed without adding it to PATH: its ``pnpm setup`` has no --no-modify-path option. Install a newer pnpm, or unset PNPM_NO_MODIFY_PATH."
-  }
   $setupArgs += '--no-modify-path'
 }
 

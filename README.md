@@ -209,12 +209,12 @@ curl -fsSL https://get.pnpm.io | PNPM_NO_MODIFY_PATH=1 sh -
 $env:PNPM_NO_MODIFY_PATH='1' ; iwr https://get.pnpm.io/ps1 -useb | iex
 ```
 
-This needs a pnpm version whose `pnpm setup` has the `--no-modify-path` option.
-With an older version, the installer stops before changing anything.
+This needs pnpm 12.16.0 or newer. With an older version, the installer stops
+before downloading anything.
 
 All the supported environment variables that can influence pnpm's installation:
 
 | Env variable      | Type                  | Description                                                                              | Example                                           |
 | ----------------- | --------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | **PNPM_VERSION**  | _version, major, or dist-tag_ | `latest` by default. The pnpm version to be installed, as a version, a major, or a dist-tag.<br>(not older than `pnpm@6.27.2`) | `PNPM_VERSION=6.31.0`<br>`PNPM_VERSION=12`<br>`PNPM_VERSION=next-12` |
-| **PNPM_NO_MODIFY_PATH** | _boolean_ | Unset by default. When set to anything but `0` or `false`, pnpm is installed without being added to `PATH`: the shell configuration and the Windows registry are left unchanged. | `PNPM_NO_MODIFY_PATH=1` |
+| **PNPM_NO_MODIFY_PATH** | _boolean_ | Unset by default. When set to anything but `0` or `false` (in any case), pnpm is installed without being added to `PATH`: the shell configuration and the Windows registry are left unchanged. Needs pnpm 12.16.0 or newer. | `PNPM_NO_MODIFY_PATH=1` |
