@@ -538,7 +538,8 @@ function Write-ShadowingPnpmWarning {
     Write-Host "To finish switching, $fix." -ForegroundColor Yellow
   } else {
     Write-Host "Warning: `"pnpm`" on PATH is $executable ($described), and $bin is not on PATH yet." -ForegroundColor Yellow
-    Write-Host "Once a new shell adds it, it has to come first: $fix." -ForegroundColor Yellow
+    $when = if ($modifyPath) { 'Once a new shell adds it' } else { 'When you add it' }
+    Write-Host "$when, it has to come first: $fix." -ForegroundColor Yellow
   }
 }
 
