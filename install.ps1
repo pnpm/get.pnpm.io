@@ -124,6 +124,27 @@ function Use-LegacyAssets {
   return $false
 }
 
+# Whether pnpm $Version is release $Minimum (major.minor.patch) or newer. A
+# prerelease of $Minimum is older. Same rule as install.sh.
+function Test-VersionAtLeast {
+  param([string]$Version, [string]$Minimum)
+  $core = ($Version -split '[-+]')[0]
+  if ($core -eq $Minimum -and $core -ne $Version) { return $false }
+  return [version]$core -ge [version]$Minimum
+}
+
+# The arguments that run the built-in `pnpm setup` of pnpm $Version. From pnpm
+# 11, a `setup` script in the current project replaces the built-in unless the
+# `pm` prefix forces it. pnpm 12.0.0 was released without the prefix.
+function Get-SetupArgs {
+  param([string]$Version)
+  $major = [int]($Version -split '\.')[0]
+  if ((Test-VersionAtLeast $Version '12.1.0') -or ($major -eq 11 -and (Test-VersionAtLeast $Version '11.0.0'))) {
+    return @('pm', 'setup')
+  }
+  return @('setup')
+}
+
 # Map the new-scheme target back to the legacy asset basename used by
 # pre-rename pnpm releases. Arch is unchanged.
 function Get-LegacyAssetBasename {
@@ -343,6 +364,13 @@ if ($null -eq $version) {
   Write-Error "Sorry! pnpm '$preferredVersion' version could not be found. Use a major, or one of the tags or published versions from the provided list"
 }
 
+# Setting PNPM_NO_MODIFY_PATH to anything but "", "0", or "false" leaves the
+# shell config and the registry alone.
+$modifyPath = $env:PNPM_NO_MODIFY_PATH -in @($null, '', '0', 'false')
+if (-not $modifyPath -and -not (Test-VersionAtLeast $version '12.16.0')) {
+  throw "pnpm $version cannot be installed without adding it to PATH: PNPM_NO_MODIFY_PATH needs pnpm 12.16.0 or newer. Install a newer pnpm, or unset PNPM_NO_MODIFY_PATH."
+}
+
 $tempFileFolder = New-TemporaryDirectory
 $majorVersion = [int]($version -split '\.')[0]
 
@@ -399,7 +427,12 @@ if ($platform -ne 'win32') {
   chmod +x $tempFile
 }
 
-$setup = Start-Process -FilePath $tempFile -ArgumentList "setup" -NoNewWindow -Wait -PassThru -ErrorAction Continue
+$setupArgs = @(Get-SetupArgs $version)
+if (-not $modifyPath) {
+  $setupArgs += '--no-modify-path'
+}
+
+$setup = Start-Process -FilePath $tempFile -ArgumentList $setupArgs -NoNewWindow -Wait -PassThru -ErrorAction Continue
 
 Remove-Item $tempFileFolder -Recurse -Force
 
@@ -505,7 +538,8 @@ function Write-ShadowingPnpmWarning {
     Write-Host "To finish switching, $fix." -ForegroundColor Yellow
   } else {
     Write-Host "Warning: `"pnpm`" on PATH is $executable ($described), and $bin is not on PATH yet." -ForegroundColor Yellow
-    Write-Host "Once a new shell adds it, it has to come first: $fix." -ForegroundColor Yellow
+    $when = if ($modifyPath) { 'Once a new shell adds it' } else { 'When you add it' }
+    Write-Host "$when, it has to come first: $fix." -ForegroundColor Yellow
   }
 }
 
@@ -515,7 +549,9 @@ function Write-ShadowingPnpmWarning {
 # environment instead.
 function Write-UndoHint {
   $pnpmHome = Get-PnpmHomeDir
-  if ($platform -eq 'win32') {
+  if (-not $modifyPath) {
+    Write-Host "To uninstall, delete $pnpmHome."
+  } elseif ($platform -eq 'win32') {
     Write-Host "To uninstall, delete $pnpmHome, then remove the PNPM_HOME variable and the Path entry pnpm setup added from your user environment variables."
   } else {
     Write-Host "To uninstall, delete $pnpmHome and the lines pnpm setup added to the shell config file named above."

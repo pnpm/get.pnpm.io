@@ -31,6 +31,8 @@ const MUTATIONS = {
   // fails the way a flaky network does, so the install only succeeds if the
   // installer retries.
   flaky: (meta) => meta,
+  // Nothing broken, for cases that drive the installer rather than the registry.
+  intact: (meta) => meta,
   'no-integrity': (meta) => {
     const dist = { ...meta.dist }
     delete dist.integrity

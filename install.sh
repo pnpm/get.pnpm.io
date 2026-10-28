@@ -442,6 +442,7 @@ download_and_install() {
   esac
 
   assert_target_is_built "$platform" "$arch" "$major_version"
+  assert_can_leave_path_alone "$version"
 
   # Intel macOS isn't supported on pnpm v11 only: the SEA binary produced
   # by Node.js for darwin-x64 segfaults at startup because of an upstream
@@ -493,7 +494,7 @@ download_and_install() {
     mv "$tmp_dir/unpacked/package/dist" "$tmp_dir/dist" || return 1
 
     chmod +x "$tmp_dir/$executable"
-    SHELL="$SHELL" "$tmp_dir/$executable" setup --force || return 1
+    run_setup "$tmp_dir/$executable" "$version" || return 1
     return 0
   fi
 
@@ -504,12 +505,12 @@ download_and_install() {
     if [ "${platform}" = "win32" ]; then
       download "https://github.com/pnpm/pnpm/releases/download/v${version}/${asset_base}.zip" > "$tmp_dir/pnpm.zip" || return 1
       unzip -q "$tmp_dir/pnpm.zip" -d "$tmp_dir" || return 1
-      SHELL="$SHELL" "$tmp_dir/pnpm.exe" setup --force || return 1
+      run_setup "$tmp_dir/pnpm.exe" "$version" || return 1
     else
       download "https://github.com/pnpm/pnpm/releases/download/v${version}/${asset_base}.tar.gz" > "$tmp_dir/pnpm.tar.gz" || return 1
       tar -xzf "$tmp_dir/pnpm.tar.gz" -C "$tmp_dir" || return 1
       chmod +x "$tmp_dir/pnpm"
-      SHELL="$SHELL" "$tmp_dir/pnpm" setup --force || return 1
+      run_setup "$tmp_dir/pnpm" "$version" || return 1
     fi
   else
     # older versions: distributed as a single executable binary
@@ -520,8 +521,70 @@ download_and_install() {
     fi
     download "$archive_url" > "$tmp_dir/pnpm" || return 1
     chmod +x "$tmp_dir/pnpm"
-    SHELL="$SHELL" "$tmp_dir/pnpm" setup --force || return 1
+    run_setup "$tmp_dir/pnpm" "$version" || return 1
   fi
+}
+
+# Whether `pnpm setup` adds pnpm to PATH. Setting PNPM_NO_MODIFY_PATH to anything
+# but "", "0", or "false" (in any case) leaves the shell config alone.
+modify_path() {
+  case "$(printf '%s' "${PNPM_NO_MODIFY_PATH:-}" | tr '[:upper:]' '[:lower:]')" in
+    '' | 0 | false) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Whether pnpm "$1" is release "$2" (major.minor.patch) or newer. A prerelease
+# of "$2" is older. Parameter expansion rather than word splitting, so zsh
+# reads it the same way, and no `local` assignment, which ksh lacks.
+version_at_least() {
+  set -- "${1%%[-+]*}" "$2" "$1"
+  if [ "$1" = "$2" ]; then
+    [ "$1" = "$3" ]
+    return
+  fi
+  set -- "${1%%.*}" "$(version_field 2 "$1")" "$(version_field 3 "$1")" \
+    "${2%%.*}" "$(version_field 2 "$2")" "$(version_field 3 "$2")"
+  if [ "$1" -ne "$4" ]; then [ "$1" -gt "$4" ]; return; fi
+  if [ "$2" -ne "$5" ]; then [ "$2" -gt "$5" ]; return; fi
+  [ "$3" -ge "$6" ]
+}
+
+# Field "$1" (2 or 3) of the major.minor.patch version "$2".
+version_field() {
+  case "$1" in
+    2) set -- "${2#*.}"; printf '%s' "${1%%.*}" ;;
+    3) printf '%s' "${2##*.}" ;;
+  esac
+}
+
+# Whether pnpm "$1" has the `pm` prefix that forces a built-in command. pnpm
+# 12.0.0 was released without it.
+has_pm_prefix() {
+  version_at_least "$1" 12.1.0 || { [ "${1%%.*}" = 11 ] && version_at_least "$1" 11.0.0; }
+}
+
+# Refuse PNPM_NO_MODIFY_PATH for pnpm "$1" if its `pnpm setup` has no
+# --no-modify-path, before anything is downloaded.
+assert_can_leave_path_alone() {
+  modify_path || version_at_least "$1" 12.16.0 || abort \
+    "pnpm $1 cannot be installed without adding it to PATH: PNPM_NO_MODIFY_PATH needs pnpm 12.16.0 or newer." \
+    "Install a newer pnpm, or unset PNPM_NO_MODIFY_PATH."
+}
+
+# Run the built-in `pnpm setup` with the executable "$1", which is pnpm "$2".
+# From pnpm 11, a `setup` script in the current project replaces the built-in
+# unless the `pm` prefix forces it.
+run_setup() {
+  if has_pm_prefix "$2"; then
+    set -- "$1" pm setup --force
+  else
+    set -- "$1" setup --force
+  fi
+  if ! modify_path; then
+    set -- "$@" --no-modify-path
+  fi
+  SHELL="$SHELL" "$@"
 }
 
 # Where `pnpm setup` installs: PNPM_HOME, or pnpm's default for the platform,
@@ -650,10 +713,14 @@ shadowing_pnpm_warning() {
       "Warning: \"pnpm\" on PATH is $executable ($described), which comes before $pnpm_home/bin." \
       "Your shell keeps running that pnpm, not the one pnpm installed to $pnpm_home/bin." \
       "To finish switching, $fix."
-  else
+  elif modify_path; then
     printf '%s\n' \
       "Warning: \"pnpm\" on PATH is $executable ($described), and $pnpm_home/bin is not on PATH yet." \
       "Once a new shell adds it, it has to come first: $fix."
+  else
+    printf '%s\n' \
+      "Warning: \"pnpm\" on PATH is $executable ($described), and $pnpm_home/bin is not on PATH yet." \
+      "When you add it, it has to come first: $fix."
   fi
 }
 
@@ -674,7 +741,11 @@ warn_if_pnpm_is_shadowed() {
 # output rather than guessing the file again. On Windows, setup edits the user
 # environment instead.
 print_undo_hint() {
-  if [ "$(detect_platform)" = 'win32' ]; then
+  if ! modify_path; then
+    printf '%s\n' \
+      "To uninstall, delete $(pnpm_home_dir)." \
+      "See https://pnpm.io/uninstall"
+  elif [ "$(detect_platform)" = 'win32' ]; then
     printf '%s\n' \
       "To uninstall, delete the PNPM_HOME directory, then remove the PNPM_HOME variable and the Path entry pnpm setup added from your user environment variables." \
       "See https://pnpm.io/uninstall"
