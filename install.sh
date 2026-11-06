@@ -386,7 +386,7 @@ assert_target_is_built() {
 
   case "${platform}-${arch}" in
     android-arm64 | android-x64) ;;
-    freebsd-x64 | linux-ppc64 | linux-riscv64 | linux-s390x) ;;
+    freebsd-x64 | netbsd-x64 | linux-ppc64 | linux-riscv64 | linux-s390x) ;;
     darwin-x64 | darwin-arm64 | linux-x64 | linux-arm64 | win32-x64 | win32-arm64) return 0 ;;
     *) abort "Sorry! pnpm does not provide a pre-built binary for ${platform}-${arch}." ;;
   esac
