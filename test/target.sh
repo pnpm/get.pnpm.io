@@ -40,13 +40,21 @@ expect_platform_on_linux() {
   [ "$actual" = "$2" ] || fail "linux, android=$1" "$2" "$actual"
 }
 
+expect_platform() {
+  # shellcheck disable=SC2329
+  uname() { printf '%s' "$mock_platform"; }
+  mock_platform="$1"
+  actual="$(detect_platform)"
+  [ "$actual" = "$2" ] || fail "$1 platform" "$2" "$actual"
+}
+
 expect_built() {
-  actual="$( (assert_target_is_built "$1" "$2" "$3" && printf 'OK') 2>&1 || true )"
+  actual="$( (assert_target_is_built "$1" "$2" "$3" "${4:-$3.0.0}" && printf 'OK') 2>&1 || true )"
   [ "$actual" = 'OK' ] || fail "$1-$2 on v$3" 'OK' "$actual"
 }
 
 expect_not_built() {
-  actual="$( (assert_target_is_built "$1" "$2" "$3" && printf 'OK') 2>&1 || true )"
+  actual="$( (assert_target_is_built "$1" "$2" "$3" "${5:-$3.0.0}" && printf 'OK') 2>&1 || true )"
   case "$actual" in
     *"$4"*) ;;
     *) fail "$1-$2 on v$3" "mentions $4" "$actual" ;;
@@ -69,7 +77,7 @@ expect_package() {
     mock_platform="$1"
     mock_arch="$2"
     libc="$3"
-    PNPM_VERSION=12.0.0 download_and_install
+  PNPM_VERSION="${version:-12.0.0}" download_and_install
   )"
   [ "$actual" = "$4" ] || fail "$1-$2 on $3" "$4" "$actual"
 }
@@ -85,6 +93,7 @@ expect_arch mips REFUSED
 
 expect_platform_on_linux yes android
 expect_platform_on_linux no linux
+expect_platform NetBSD netbsd
 
 expect_built linux arm64 11
 expect_built darwin x64 10
@@ -94,10 +103,14 @@ expect_built darwin arm64 10
 expect_built win32 x64 11
 
 expect_built freebsd x64 12
+expect_built netbsd x64 12 12.19.0
 expect_built linux ppc64 12
 expect_built linux riscv64 12
 expect_built linux s390x 12
 expect_not_built freebsd x64 11 'pnpm 12 does'
+expect_not_built netbsd x64 11 'pnpm 12 does'
+expect_not_built netbsd x64 12 'pnpm 12.19.0 or newer' 12.18.0
+expect_not_built netbsd x64 12 'pnpm 12.19.0 or newer' 12.19.0-rc.1
 expect_not_built linux ppc64 11 'linux-ppc64'
 expect_not_built linux riscv64 11 'linux-riscv64'
 expect_not_built linux s390x 10 'linux-s390x'
@@ -112,6 +125,7 @@ for major in 10 11 12; do
   expect_not_built win32 s390x "$major" 'does not provide a pre-built binary for win32-s390x'
   expect_not_built android riscv64 "$major" 'does not provide a pre-built binary for android-riscv64'
   expect_not_built openbsd x64 "$major" 'does not provide a pre-built binary for openbsd-x64'
+  expect_not_built netbsd arm64 "$major" 'does not provide a pre-built binary for netbsd-arm64'
 done
 
 for libc in glibc musl; do
@@ -119,6 +133,7 @@ for libc in glibc musl; do
     expect_package linux "$arch" "$libc" "@pnpm/exe.linux-$arch"
   done
   expect_package freebsd x64 "$libc" '@pnpm/exe.freebsd-x64'
+  version=12.19.0 expect_package netbsd x64 "$libc" '@pnpm/exe.netbsd-x64'
   expect_package android arm64 "$libc" '@pnpm/exe.android-arm64'
 done
 for arch in x64 arm64; do

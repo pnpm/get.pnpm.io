@@ -379,14 +379,15 @@ detect_arch() {
 }
 
 assert_target_is_built() {
-  local platform arch major
+  local platform arch major version netbsd_major netbsd_minor netbsd_pre_release_before_minimum
   platform="$1"
   arch="$2"
   major="$3"
+  version="${4:-$3.0.0}"
 
   case "${platform}-${arch}" in
     android-arm64 | android-x64) ;;
-    freebsd-x64 | linux-ppc64 | linux-riscv64 | linux-s390x) ;;
+    freebsd-x64 | netbsd-x64 | linux-ppc64 | linux-riscv64 | linux-s390x) ;;
     darwin-x64 | darwin-arm64 | linux-x64 | linux-arm64 | win32-x64 | win32-arm64) return 0 ;;
     *) abort "Sorry! pnpm does not provide a pre-built binary for ${platform}-${arch}." ;;
   esac
@@ -396,6 +397,22 @@ assert_target_is_built() {
       "" \
       "pnpm 12 does. Install it with:" \
       "  PNPM_VERSION=12 sh -c \"\$(curl -fsSL https://get.pnpm.io/install.sh)\""
+  fi
+  if [ "${platform}-${arch}" = 'netbsd-x64' ]; then
+    netbsd_major="$(printf '%s' "$version" | sed -E 's/^v//; s/^([0-9]+)\.([0-9]+).*/\1/')"
+    netbsd_minor="$(printf '%s' "$version" | sed -E 's/^v//; s/^[0-9]+\.([0-9]+).*/\1/')"
+    netbsd_pre_release_before_minimum=0
+    case "${version#v}" in
+      12.19.0-*) netbsd_pre_release_before_minimum=1 ;;
+    esac
+    if [ "$netbsd_major" -lt 12 ] || \
+      { [ "$netbsd_major" -eq 12 ] && [ "$netbsd_minor" -lt 19 ]; } || \
+      [ "$netbsd_pre_release_before_minimum" -eq 1 ]; then
+      abort "pnpm v${version} does not provide a pre-built binary for ${platform}-${arch}." \
+        "" \
+        "pnpm 12.19.0 or newer does. Install it with:" \
+        "  PNPM_VERSION=12.19.0 sh -c \"\$(curl -fsSL https://get.pnpm.io/install.sh)\""
+    fi
   fi
 }
 
@@ -441,7 +458,7 @@ download_and_install() {
     '' | *[!0-9]*) abort "Invalid pnpm version: $version" ;;
   esac
 
-  assert_target_is_built "$platform" "$arch" "$major_version"
+  assert_target_is_built "$platform" "$arch" "$major_version" "$version"
   assert_can_leave_path_alone "$version"
 
   # Intel macOS isn't supported on pnpm v11 only: the SEA binary produced
