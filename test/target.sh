@@ -110,6 +110,7 @@ expect_built linux s390x 12
 expect_not_built freebsd x64 11 'pnpm 12 does'
 expect_not_built netbsd x64 11 'pnpm 12 does'
 expect_not_built netbsd x64 12 'pnpm 12.19.0 or newer' 12.18.0
+expect_not_built netbsd x64 12 'pnpm 12.19.0 or newer' 12.19.0-rc.1
 expect_not_built linux ppc64 11 'linux-ppc64'
 expect_not_built linux riscv64 11 'linux-riscv64'
 expect_not_built linux s390x 10 'linux-s390x'

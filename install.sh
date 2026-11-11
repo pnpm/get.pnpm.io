@@ -277,7 +277,6 @@ is_android() {
   [ -e /system/bin/linker64 ]
 }
 
-# Detect the operating system name used by the pnpm binary package registry.
 detect_platform() {
   local platform
   platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -379,9 +378,8 @@ detect_arch() {
   printf '%s' "${arch}"
 }
 
-# Reject platform/version combinations before attempting to fetch an executable.
 assert_target_is_built() {
-  local platform arch major version netbsd_major netbsd_minor
+  local platform arch major version netbsd_major netbsd_minor netbsd_pre_release_before_minimum
   platform="$1"
   arch="$2"
   major="$3"
@@ -403,7 +401,13 @@ assert_target_is_built() {
   if [ "${platform}-${arch}" = 'netbsd-x64' ]; then
     netbsd_major="$(printf '%s' "$version" | sed -E 's/^v//; s/^([0-9]+)\.([0-9]+).*/\1/')"
     netbsd_minor="$(printf '%s' "$version" | sed -E 's/^v//; s/^[0-9]+\.([0-9]+).*/\1/')"
-    if [ "$netbsd_major" -lt 12 ] || { [ "$netbsd_major" -eq 12 ] && [ "$netbsd_minor" -lt 19 ]; }; then
+    netbsd_pre_release_before_minimum=0
+    case "${version#v}" in
+      12.19.0-*) netbsd_pre_release_before_minimum=1 ;;
+    esac
+    if [ "$netbsd_major" -lt 12 ] || \
+      { [ "$netbsd_major" -eq 12 ] && [ "$netbsd_minor" -lt 19 ]; } || \
+      [ "$netbsd_pre_release_before_minimum" -eq 1 ]; then
       abort "pnpm v${version} does not provide a pre-built binary for ${platform}-${arch}." \
         "" \
         "pnpm 12.19.0 or newer does. Install it with:" \
