@@ -379,11 +379,11 @@ detect_arch() {
 }
 
 assert_target_is_built() {
-  local platform arch major version netbsd_major netbsd_minor netbsd_pre_release_before_minimum
+  local platform arch major version
   platform="$1"
   arch="$2"
   major="$3"
-  version="${4:-$3.0.0}"
+  version="$4"
 
   case "${platform}-${arch}" in
     android-arm64 | android-x64) ;;
@@ -398,21 +398,13 @@ assert_target_is_built() {
       "pnpm 12 does. Install it with:" \
       "  PNPM_VERSION=12 sh -c \"\$(curl -fsSL https://get.pnpm.io/install.sh)\""
   fi
-  if [ "${platform}-${arch}" = 'netbsd-x64' ]; then
-    netbsd_major="$(printf '%s' "$version" | sed -E 's/^v//; s/^([0-9]+)\.([0-9]+).*/\1/')"
-    netbsd_minor="$(printf '%s' "$version" | sed -E 's/^v//; s/^[0-9]+\.([0-9]+).*/\1/')"
-    netbsd_pre_release_before_minimum=0
-    case "${version#v}" in
-      12.19.0-*) netbsd_pre_release_before_minimum=1 ;;
-    esac
-    if [ "$netbsd_major" -lt 12 ] || \
-      { [ "$netbsd_major" -eq 12 ] && [ "$netbsd_minor" -lt 19 ]; } || \
-      [ "$netbsd_pre_release_before_minimum" -eq 1 ]; then
-      abort "pnpm v${version} does not provide a pre-built binary for ${platform}-${arch}." \
-        "" \
-        "pnpm 12.19.0 or newer does. Install it with:" \
-        "  PNPM_VERSION=12.19.0 sh -c \"\$(curl -fsSL https://get.pnpm.io/install.sh)\""
-    fi
+  # netbsd-x64 was first published with pnpm 12.19.0.
+  if [ "${platform}-${arch}" = 'netbsd-x64' ] && ! version_at_least "$version" 12.19.0; then
+    abort \
+      "pnpm v${version} does not provide a pre-built binary for ${platform}-${arch}." \
+      "" \
+      "pnpm 12.19.0 and newer do. Install the latest pnpm 12 with:" \
+      "  PNPM_VERSION=12 sh -c \"\$(curl -fsSL https://get.pnpm.io/install.sh)\""
   fi
 }
 
