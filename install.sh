@@ -357,6 +357,7 @@ detect_arch() {
     x86_64 | amd64) arch="x64" ;;
     armv*) arch="arm" ;;
     arm64 | aarch64) arch="arm64" ;;
+    loong64 | loongarch64) arch="loong64";;
     ppc64le) arch="ppc64" ;;
     # Node names both POWER endiannesses ppc64; only little-endian is built.
     ppc64) return 1 ;;
@@ -372,7 +373,7 @@ detect_arch() {
   case "$arch" in
     x64*) ;;
     arm64*) ;;
-    ppc64 | riscv64 | s390x) ;;
+    loong64 | ppc64 | riscv64 | s390x) ;;
     *) return 1
   esac
   printf '%s' "${arch}"
@@ -387,7 +388,7 @@ assert_target_is_built() {
 
   case "${platform}-${arch}" in
     android-arm64 | android-x64) ;;
-    freebsd-x64 | netbsd-x64 | linux-ppc64 | linux-riscv64 | linux-s390x) ;;
+    freebsd-x64 | netbsd-x64 | linux-loong64 | linux-ppc64 | linux-riscv64 | linux-s390x) ;;
     darwin-x64 | darwin-arm64 | linux-x64 | linux-arm64 | win32-x64 | win32-arm64) return 0 ;;
     *) abort "Sorry! pnpm does not provide a pre-built binary for ${platform}-${arch}." ;;
   esac
@@ -404,6 +405,14 @@ assert_target_is_built() {
       "pnpm v${version} does not provide a pre-built binary for ${platform}-${arch}." \
       "" \
       "pnpm 12.19.0 and newer do. Install the latest pnpm 12 with:" \
+      "  PNPM_VERSION=12 sh -c \"\$(curl -fsSL https://get.pnpm.io/install.sh)\""
+  fi
+  # linux-loong64 was first published with pnpm 12.23.0.
+  if [ "${platform}-${arch}" = 'linux-loong64' ] && ! version_at_least "$version" 12.23.0; then
+    abort \
+      "pnpm v${version} does not provide a pre-built binary for ${platform}-${arch}." \
+      "" \
+      "pnpm 12.23.0 and newer do. Install the latest pnpm 12 with:" \
       "  PNPM_VERSION=12 sh -c \"\$(curl -fsSL https://get.pnpm.io/install.sh)\""
   fi
 }

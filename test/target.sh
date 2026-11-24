@@ -87,6 +87,8 @@ expect_arch aarch64 arm64
 expect_arch riscv64 riscv64
 expect_arch s390x s390x
 expect_arch ppc64le ppc64
+expect_arch loongarch64 loong64
+expect_arch loong64 loong64
 expect_arch ppc64 REFUSED
 expect_arch i686 REFUSED
 expect_arch mips REFUSED
@@ -107,6 +109,7 @@ expect_built netbsd x64 12 12.19.0
 expect_built linux ppc64 12
 expect_built linux riscv64 12
 expect_built linux s390x 12
+expect_built linux loong64 12 12.23.0
 expect_not_built freebsd x64 11 'pnpm 12 does'
 expect_not_built netbsd x64 11 'pnpm 12 does'
 expect_not_built netbsd x64 12 'pnpm 12.19.0 and newer' 12.18.0
@@ -116,6 +119,8 @@ expect_built netbsd x64 13 13.0.0
 expect_not_built linux ppc64 11 'linux-ppc64'
 expect_not_built linux riscv64 11 'linux-riscv64'
 expect_not_built linux s390x 10 'linux-s390x'
+expect_not_built linux loong64 11 'pnpm 12 does'
+expect_not_built linux loong64 12 'pnpm 12.23.0 and newer' 12.22.0
 expect_built android arm64 12
 expect_built android x64 12
 expect_not_built android arm64 11 'android-arm64'
@@ -134,6 +139,7 @@ for libc in glibc musl; do
   for arch in ppc64 riscv64 s390x; do
     expect_package linux "$arch" "$libc" "@pnpm/exe.linux-$arch"
   done
+  expect_package linux loong64 $libc "@pnpm/exe.linux-loong64" 12.23.0
   expect_package freebsd x64 "$libc" '@pnpm/exe.freebsd-x64'
   expect_package netbsd x64 "$libc" '@pnpm/exe.netbsd-x64' 12.19.0
   expect_package android arm64 "$libc" '@pnpm/exe.android-arm64'
